@@ -1,0 +1,75 @@
+# Experiment Configuration for Lottery Ticket Hypothesis Pruning Study
+# This config covers comparative study of pruning methods and adaptive hybrid pruning
+
+experiment:
+  name: "LTH Pruning Experiments"
+  description: "Comparative study and improvement of pruning methods related to Lottery Ticket Hypothesis"
+
+# Datasets to use
+datasets:
+  - name: cifar10
+    num_classes: 10
+  - name: cifar100
+    num_classes: 100
+
+# Model architectures
+models:
+  - resnet20
+  - resnet50
+  - vgg16
+
+# Pruning methods (baselines and proposed)
+pruning_methods:
+  - imp  # Iterative Magnitude Pruning
+  - snip  # Single-shot Network Pruning
+  - grasp  # Gradient Signal Preservation
+  - synflow  # Synaptic Flow
+  - early_bird  # Early-Bird Ticket
+  - fisher  # Fisher Information Pruning
+  - genetic  # Genetic Algorithm Pruning
+  - hybrid  # Hybrid OneShot-Iterative
+  - adaptive_hybrid  # Proposed: Adaptive Hybrid with Dynamic Switching
+
+# Training hyperparameters
+training:
+  epochs: 160  # Standard for CIFAR
+  batch_size: 128
+  learning_rate: 0.1
+  momentum: 0.9
+  weight_decay: 5e-4
+  scheduler: cosine  # Learning rate scheduler
+  warmup_epochs: 5
+
+# Pruning configuration
+pruning:
+  sparsity_levels: [0.1, 0.2, 0.3, 0.5, 0.7, 0.9]  # Target sparsities
+  pruning_schedule: iterative  # or oneshot
+  iterations: 10  # For iterative pruning
+  adaptive_threshold: true  # For proposed method
+
+# Experiment settings
+experiment_settings:
+  seeds: [42, 123, 456, 789, 101112]  # 5 seeds as per plan
+  num_runs: 3  # Minimum runs per config
+  save_checkpoints: true
+  log_interval: 100  # Steps between logs
+
+# Evaluation metrics
+evaluation:
+  metrics: [accuracy, loss, sparsity, flops, params]
+  test_frequency: 5  # Evaluate every 5 epochs
+
+# Logging and tracking
+logging:
+  wandb:
+    enabled: true
+    project: "lth-pruning-study"
+    entity: null  # Set your wandb entity
+  tensorboard: true
+  save_dir: "./results"
+
+# Hardware
+hardware:
+  device: cuda  # or cpu
+  num_workers: 4
+  pin_memory: true
