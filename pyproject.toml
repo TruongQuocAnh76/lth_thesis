@@ -5,7 +5,7 @@ description = "Default template for PDM package"
 authors = [
     {name = "", email = "truongquocanh_t67@hus.edu.vn"},
 ]
-dependencies = ["torch>=2.9.1", "torchvision>=0.24.1", "wandb>=0.23.1"]
+dependencies = ["torch>=2.9.1", "torchvision>=0.24.1", "wandb>=0.23.1", "pytest>=9.0.2"]
 requires-python = "==3.13.*"
 readme = "README.md"
 license = {text = "MIT"}
@@ -13,3 +13,10 @@ license = {text = "MIT"}
 
 [tool.pdm]
 distribution = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v"
