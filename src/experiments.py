@@ -5,6 +5,7 @@ This module implements experiments for various pruning methods,
 starting with Iterative Magnitude Pruning (IMP).
 """
 
+import sys
 import json
 import copy
 import datetime
@@ -15,6 +16,11 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
+
+# Ensure project root on sys.path for script execution
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from src.model import get_model, count_parameters
 from src.data import get_dataloaders
