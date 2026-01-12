@@ -188,6 +188,7 @@ class IMPExperiment:
         # Store initial weights (the "lottery ticket" initialization)
         initial_weights = get_prunable_layers(model)
         initial_state_dict = copy.deepcopy(model.state_dict())
+        self.initial_model_state_dict = initial_state_dict  # Save for later
         
         # Create initial masks (all ones = no pruning)
         masks = create_initial_masks(initial_weights)
@@ -276,6 +277,10 @@ class IMPExperiment:
             'accuracy_at_target_sparsity': self.results['iterations'][-1]['test_accuracy'],
         }
         
+        # Store final model state and masks for saving
+        self.final_model_state_dict = copy.deepcopy(model.state_dict())
+        self.final_masks = masks
+        
         # Save results
         self._save_results()
         
@@ -300,6 +305,21 @@ class IMPExperiment:
         # Save summary CSV
         summary_path = result_dir / "summary.csv"
         self._save_summary_csv(summary_path)
+        
+        # Save model checkpoints if stored during experiment
+        if hasattr(self, 'initial_model_state_dict'):
+            initial_model_path = result_dir / "initial_model.pt"
+            torch.save(self.initial_model_state_dict, initial_model_path)
+        
+        if hasattr(self, 'final_model_state_dict'):
+            final_model_path = result_dir / "final_model.pt"
+            torch.save(self.final_model_state_dict, final_model_path)
+        
+        if hasattr(self, 'final_masks'):
+            masks_path = result_dir / "final_masks.pt"
+            # Convert numpy arrays to torch tensors for consistency
+            masks_torch = {k: torch.from_numpy(v) for k, v in self.final_masks.items()}
+            torch.save(masks_torch, masks_path)
         
         print(f"\nResults saved to: {result_dir}")
     
