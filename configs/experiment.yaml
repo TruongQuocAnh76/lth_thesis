@@ -32,7 +32,7 @@ pruning_methods:
 
 # Training hyperparameters
 training:
-  epochs: 60  # Standard for CIFAR
+  epochs: 100  # Standard for CIFAR
   batch_size: 128
   learning_rate: 0.1
   momentum: 0.9
