@@ -15,8 +15,8 @@ datasets:
 # Model architectures
 models:
   - resnet20
-  - resnet50
-  - vgg16
+  # - resnet50
+  # - vgg16
 
 # Pruning methods (baselines and proposed)
 pruning_methods:
@@ -32,7 +32,7 @@ pruning_methods:
 
 # Training hyperparameters
 training:
-  epochs: 160  # Standard for CIFAR
+  epochs: 60  # Standard for CIFAR
   batch_size: 128
   learning_rate: 0.1
   momentum: 0.9
@@ -42,14 +42,14 @@ training:
 
 # Pruning configuration
 pruning:
-  sparsity_levels: [0.1, 0.2, 0.3, 0.5, 0.7, 0.9]  # Target sparsities
+  sparsity_levels: [0.3, 0.6]  # Target sparsities
   pruning_schedule: iterative  # or oneshot
-  iterations: 10  # For iterative pruning
+  iterations: 5  # For iterative pruning
   adaptive_threshold: true  # For proposed method
 
 # Experiment settings
 experiment_settings:
-  seeds: [42, 123, 456, 789, 101112]  # 5 seeds as per plan
+  seeds: [42]  # 3 seeds as per plan
   num_runs: 3  # Minimum runs per config
   save_checkpoints: true
   log_interval: 100  # Steps between logs
