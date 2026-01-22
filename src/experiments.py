@@ -16,6 +16,7 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
+from tqdm import tqdm
 
 # Ensure project root on sys.path for script execution
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -30,7 +31,17 @@ from src.pruning import (
     prune_by_percent,
     prune_by_magnitude_global,
     get_sparsity,
-    get_overall_sparsity
+    get_overall_sparsity,
+)
+# Early-Bird is in separate module - uses BN gamma, NOT weight magnitudes
+from src.earlybird import (
+    EarlyBirdFinder,
+    extract_bn_gammas,
+    compute_channel_mask_from_bn_gamma,
+    expand_channel_mask_to_conv_weights,
+    add_l1_regularization_to_bn,
+    get_bn_layer_count,
+    get_overall_channel_sparsity,
 )
 from src.util import (
     load_config,
@@ -38,6 +49,7 @@ from src.util import (
     get_prunable_layers,
     apply_masks_to_model,
     create_mask_apply_fn,
+    compute_mask_overlap,
 )
 
 
@@ -404,6 +416,609 @@ def run_imp_experiment(
     return experiment.run()
 
 
+class EarlyBirdExperiment:
+    """Early-Bird Lottery Ticket Discovery experiment runner.
+    
+    Implements the CORRECT Early-Bird algorithm (You et al., ICLR 2020):
+    1. Train network with L1 regularization on BatchNorm γ values
+    2. At end of each EPOCH, compute channel pruning mask from |γ|
+    3. Monitor mask stability: max(last K distances) < ε
+    4. When masks stabilize → early-bird ticket found
+    5. Train pruned network from initialization using discovered ticket
+    
+    CRITICAL: Early-Bird uses BatchNorm γ (scaling factors) for channel pruning,
+    NOT weight magnitudes. This is fundamentally different from IMP.
+    
+    Key properties:
+    - Signal: BatchNorm γ values (NOT weight magnitudes)
+    - Unit: Channels/filters (NOT individual weights) - structured pruning
+    - Convergence: max(last K distances) < ε (NOT consecutive counter)
+    - Timing: Checked every EPOCH (NOT arbitrary step intervals)
+    """
+    
+    def __init__(
+        self,
+        model_name: str,
+        dataset_name: str,
+        num_classes: int,
+        target_sparsity: float,
+        search_epochs: int = 40,
+        finetune_epochs: int = 160,
+        batch_size: int = 128,
+        learning_rate: float = 0.1,
+        momentum: float = 0.9,
+        weight_decay: float = 5e-4,
+        l1_coef: float = 1e-4,  # L1 regularization on BN gamma
+        seed: int = 42,
+        device: str = "cuda",
+        save_dir: str = "./results",
+        pruning_method: str = 'global',
+        patience: int = 5,
+        distance_threshold: float = 0.1,
+    ):
+        """Initialize Early-Bird experiment.
+        
+        Args:
+            model_name: Name of model architecture (must have BatchNorm layers)
+            dataset_name: Name of dataset
+            num_classes: Number of output classes
+            target_sparsity: Target channel sparsity for pruning
+            search_epochs: Epochs to search for early-bird ticket
+            finetune_epochs: Epochs to train with discovered ticket
+            batch_size: Training batch size
+            learning_rate: Initial learning rate
+            momentum: SGD momentum
+            weight_decay: L2 regularization weight
+            l1_coef: L1 regularization coefficient on BN γ (crucial for Early-Bird!)
+            seed: Random seed
+            device: Device to use
+            save_dir: Directory to save results
+            pruning_method: 'global' or 'layerwise' channel pruning
+            patience: Window size K for max(last K distances) < ε check
+            distance_threshold: ε threshold for convergence
+        """
+        self.model_name = model_name
+        self.dataset_name = dataset_name
+        self.num_classes = num_classes
+        self.target_sparsity = target_sparsity
+        self.search_epochs = search_epochs
+        self.finetune_epochs = finetune_epochs
+        self.batch_size = batch_size
+        self.learning_rate = learning_rate
+        self.momentum = momentum
+        self.weight_decay = weight_decay
+        self.l1_coef = l1_coef
+        self.seed = seed
+        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
+        self.save_dir = Path(save_dir)
+        self.pruning_method = pruning_method
+        self.patience = patience
+        self.distance_threshold = distance_threshold
+        
+        # Results storage
+        self.results = {
+            'config': self._get_config_dict(),
+            'search_phase': {},
+            'finetune_phase': {},
+            'final_results': {}
+        }
+        
+    def _get_config_dict(self) -> Dict:
+        """Return experiment configuration as dictionary."""
+        return {
+            'model_name': self.model_name,
+            'dataset_name': self.dataset_name,
+            'num_classes': self.num_classes,
+            'target_sparsity': self.target_sparsity,
+            'search_epochs': self.search_epochs,
+            'finetune_epochs': self.finetune_epochs,
+            'batch_size': self.batch_size,
+            'learning_rate': self.learning_rate,
+            'momentum': self.momentum,
+            'weight_decay': self.weight_decay,
+            'l1_coef': self.l1_coef,
+            'seed': self.seed,
+            'pruning_method': self.pruning_method,
+            'patience': self.patience,
+            'distance_threshold': self.distance_threshold,
+        }
+    
+    def _create_model(self) -> nn.Module:
+        """Create and return model instance."""
+        model = get_model(self.model_name, num_classes=self.num_classes)
+        return model.to(self.device)
+    
+    def _create_optimizer(self, model: nn.Module) -> optim.Optimizer:
+        """Create optimizer for model."""
+        return optim.SGD(
+            model.parameters(),
+            lr=self.learning_rate,
+            momentum=self.momentum,
+            weight_decay=self.weight_decay
+        )
+    
+    def _create_scheduler(self, optimizer: optim.Optimizer, epochs: int) -> Any:
+        """Create learning rate scheduler."""
+        return CosineAnnealingLR(optimizer, T_max=epochs)
+    
+    def _train_epoch_with_l1(
+        self,
+        model: nn.Module,
+        train_loader: Any,
+        criterion: nn.Module,
+        optimizer: optim.Optimizer,
+    ) -> Tuple[float, float]:
+        """Train one epoch with L1 regularization on BatchNorm γ.
+        
+        This is the key difference from regular training:
+        We add L1 regularization to BN γ values to encourage sparsity,
+        which makes Early-Bird convergence detection work.
+        
+        Returns:
+            Tuple of (train_loss, train_accuracy)
+        """
+        model.train()
+        epoch_loss = 0
+        correct = 0
+        total = 0
+        
+        for data, target in train_loader:
+            data, target = data.to(self.device), target.to(self.device)
+            
+            optimizer.zero_grad()
+            output = model(data)
+            
+            # Classification loss
+            ce_loss = criterion(output, target)
+            
+            # L1 regularization on BatchNorm γ (CRUCIAL for Early-Bird!)
+            l1_loss = add_l1_regularization_to_bn(model, self.l1_coef)
+            
+            # Total loss
+            loss = ce_loss + l1_loss
+            
+            loss.backward()
+            optimizer.step()
+            
+            epoch_loss += ce_loss.item()  # Report CE loss only for comparison
+            pred = output.argmax(dim=1, keepdim=True)
+            correct += pred.eq(target.view_as(pred)).sum().item()
+            total += target.size(0)
+        
+        train_loss = epoch_loss / len(train_loader)
+        train_acc = 100. * correct / total
+        
+        return train_loss, train_acc
+    
+    def _search_for_ticket(
+        self,
+        model: nn.Module,
+        train_loader: Any,
+        test_loader: Any,
+        criterion: nn.Module,
+        optimizer: optim.Optimizer,
+        scheduler: Any,
+        finder: EarlyBirdFinder,
+        num_epochs: int
+    ) -> Dict[str, Any]:
+        """Train while searching for Early-Bird ticket via BN γ convergence.
+        
+        Key difference from old implementation:
+        - Checks mask at END of each EPOCH (not every step)
+        - Uses BN γ values (not weight magnitudes)
+        - Uses max(last K distances) < ε (not consecutive counter)
+        
+        Returns:
+            Dictionary with training history and convergence info
+        """
+        train_losses = []
+        train_accs = []
+        test_losses = []
+        test_accs = []
+        
+        converged = False
+        convergence_epoch = -1
+        
+        print(f"Searching for Early-Bird ticket via BN γ convergence...")
+        print(f"L1 regularization coefficient: {self.l1_coef}")
+        pbar = tqdm(range(num_epochs), desc="Search Phase")
+        
+        for epoch in pbar:
+            # Train one epoch with L1 on BN γ
+            train_loss, train_acc = self._train_epoch_with_l1(
+                model, train_loader, criterion, optimizer
+            )
+            train_losses.append(train_loss)
+            train_accs.append(train_acc)
+            
+            # Evaluate
+            test_loss, test_acc = evaluate(model, test_loader, criterion, self.device)
+            test_losses.append(test_loss)
+            test_accs.append(test_acc)
+            
+            # Step scheduler
+            if scheduler is not None:
+                scheduler.step()
+            
+            # *** EPOCH-LEVEL MASK CHECK (correct Early-Bird behavior) ***
+            if not converged:
+                conv, distance = finder.record_epoch(model, epoch)
+                
+                if conv:
+                    converged = True
+                    convergence_epoch = epoch
+                    stats = finder.get_statistics()
+                    print(f"\n🎯 Early-Bird ticket found at epoch {epoch}!")
+                    print(f"   Max of last {self.patience} distances: {stats.get('max_last_k', 'N/A'):.6f}")
+                    print(f"   Threshold: {self.distance_threshold}")
+            
+            pbar.set_postfix({
+                'train_acc': f'{train_acc:.2f}%',
+                'test_acc': f'{test_acc:.2f}%',
+                'converged': converged,
+                'dist': f'{distance:.4f}' if distance is not None else 'N/A'
+            })
+        
+        return {
+            'train_losses': train_losses,
+            'train_accs': train_accs,
+            'test_losses': test_losses,
+            'test_accs': test_accs,
+            'converged': converged,
+            'convergence_epoch': convergence_epoch,
+            'total_epochs': num_epochs
+        }
+    
+    def run(self) -> Dict[str, Any]:
+        """Run the complete Early-Bird experiment.
+        
+        Returns:
+            Dictionary containing all experiment results
+        """
+        print(f"\n{'='*60}")
+        print(f"Starting Early-Bird Experiment (BN γ Channel Pruning)")
+        print(f"Model: {self.model_name}, Dataset: {self.dataset_name}")
+        print(f"Target Channel Sparsity: {self.target_sparsity:.1%}")
+        print(f"Search Epochs: {self.search_epochs}")
+        print(f"L1 Coefficient: {self.l1_coef}")
+        print(f"Device: {self.device}")
+        print(f"{'='*60}\n")
+        
+        # Set random seed
+        set_seed(self.seed)
+        
+        # Load data
+        print("Loading dataset...")
+        loaders = get_dataloaders(
+            self.dataset_name,
+            batch_size=self.batch_size,
+            num_workers=4
+        )
+        train_loader = loaders['train']
+        test_loader = loaders['test']
+        
+        # Create model and save initial weights
+        print("Initializing model...")
+        model = self._create_model()
+        param_count = count_parameters(model)
+        print(f"Model parameters: {param_count['total']:,}")
+        
+        # Check that model has BatchNorm layers (required for Early-Bird!)
+        num_bn_layers = get_bn_layer_count(model)
+        if num_bn_layers == 0:
+            raise ValueError(
+                f"Model {self.model_name} has no BatchNorm layers! "
+                "Early-Bird requires BatchNorm γ values for channel pruning."
+            )
+        print(f"BatchNorm layers: {num_bn_layers}")
+        
+        # Store initial state (the lottery ticket initialization)
+        initial_state_dict = copy.deepcopy(model.state_dict())
+        self.initial_model_state_dict = initial_state_dict
+        
+        criterion = nn.CrossEntropyLoss()
+        
+        # ===================================================================
+        # PHASE 1: Search for Early-Bird Ticket via BN γ Convergence
+        # ===================================================================
+        print(f"\n{'='*60}")
+        print("PHASE 1: Searching for Early-Bird Ticket (BN γ Channel Pruning)")
+        print(f"{'='*60}")
+        
+        # Initialize Early-Bird finder (uses BN γ, not weights!)
+        finder = EarlyBirdFinder(
+            target_sparsity=self.target_sparsity,
+            patience=self.patience,
+            distance_threshold=self.distance_threshold,
+            pruning_method=self.pruning_method,
+        )
+        
+        # Train with L1 regularization and search for stable mask
+        optimizer = self._create_optimizer(model)
+        scheduler = self._create_scheduler(optimizer, self.search_epochs)
+        
+        search_results = self._search_for_ticket(
+            model=model,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            criterion=criterion,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            finder=finder,
+            num_epochs=self.search_epochs
+        )
+        
+        # Get Early-Bird channel mask
+        channel_mask = finder.get_early_bird_ticket()
+        ticket_stats = finder.get_statistics()
+        
+        if channel_mask is None:
+            print("\n⚠️  Warning: Early-Bird ticket not found within search epochs!")
+            print("    Using final BN γ mask from search phase.")
+            bn_gammas = extract_bn_gammas(model)
+            channel_mask = compute_channel_mask_from_bn_gamma(
+                bn_gammas, self.target_sparsity, self.pruning_method
+            )
+        
+        # Convert channel mask to Conv weight mask
+        weight_mask = expand_channel_mask_to_conv_weights(channel_mask, model)
+        channel_sparsity = get_overall_channel_sparsity(channel_mask)
+        
+        print(f"\n{'='*60}")
+        print("Search Phase Complete")
+        print(f"Converged: {search_results['converged']}")
+        if search_results['converged']:
+            print(f"Convergence Epoch: {search_results['convergence_epoch']}")
+        print(f"Channel Sparsity: {channel_sparsity:.2%}")
+        print(f"Search Accuracy: {search_results['test_accs'][-1]:.2f}%")
+        print(f"{'='*60}\n")
+        
+        # Store search results
+        self.results['search_phase'] = {
+            'train_losses': search_results['train_losses'],
+            'train_accs': search_results['train_accs'],
+            'test_losses': search_results['test_losses'],
+            'test_accs': search_results['test_accs'],
+            'converged': search_results['converged'],
+            'convergence_epoch': search_results['convergence_epoch'],
+            'total_epochs': search_results['total_epochs'],
+            'channel_sparsity': channel_sparsity,
+            'distance_history': ticket_stats['distance_history'],
+            'final_test_acc': search_results['test_accs'][-1]
+        }
+        
+        # ===================================================================
+        # PHASE 2: Train with Early-Bird Ticket (Channel-Pruned Network)
+        # ===================================================================
+        print(f"\n{'='*60}")
+        print("PHASE 2: Training with Early-Bird Channel Mask")
+        print(f"{'='*60}")
+        
+        # Reset to initial weights and apply discovered channel mask
+        model.load_state_dict(copy.deepcopy(initial_state_dict))
+        apply_masks_to_model(model, weight_mask)
+        
+        # Create fresh optimizer and scheduler for finetuning
+        optimizer = self._create_optimizer(model)
+        scheduler = self._create_scheduler(optimizer, self.finetune_epochs)
+        apply_mask_fn = create_mask_apply_fn(model)
+        
+        # Train with the ticket (NO L1 regularization in finetune phase)
+        print(f"Training for {self.finetune_epochs} epochs with discovered ticket...")
+        finetune_results = train_epochs(
+            model=model,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            criterion=criterion,
+            optimizer=optimizer,
+            num_epochs=self.finetune_epochs,
+            device=self.device,
+            scheduler=scheduler,
+            masks=weight_mask,  # Use expanded weight mask from channel mask
+            apply_mask_fn=apply_mask_fn,
+            verbose=True
+        )
+        
+        # Final evaluation
+        final_test_loss, final_test_acc = evaluate(model, test_loader, criterion, self.device)
+        
+        print(f"\n{'='*60}")
+        print("Training Complete")
+        print(f"Final Test Accuracy: {final_test_acc:.2f}%")
+        print(f"Channel Sparsity: {channel_sparsity:.2%}")
+        print(f"{'='*60}\n")
+        
+        # Store finetune results
+        self.results['finetune_phase'] = {
+            'train_losses': finetune_results['train_losses'],
+            'train_accs': finetune_results['train_accs'],
+            'test_losses': finetune_results['test_losses'],
+            'test_accs': finetune_results['test_accs'],
+            'final_test_acc': final_test_acc,
+            'final_test_loss': final_test_loss,
+            'channel_sparsities': {k: float(1 - m.mean()) for k, m in channel_mask.items()}
+        }
+        
+        # Final results
+        self.results['final_results'] = {
+            'channel_sparsity': channel_sparsity,
+            'final_test_accuracy': final_test_acc,
+            'search_test_accuracy': search_results['test_accs'][-1],
+            'converged': search_results['converged'],
+            'convergence_epoch': search_results['convergence_epoch'],
+            'total_search_epochs': search_results['total_epochs'],
+            'training_efficiency': (
+                search_results['convergence_epoch'] / self.search_epochs
+                if search_results['converged'] else 1.0
+            )
+        }
+        
+        # Store final model and masks
+        self.final_model_state_dict = copy.deepcopy(model.state_dict())
+        self.channel_mask = channel_mask
+        self.weight_mask = weight_mask
+        
+        # Save results
+        self._save_results()
+        
+        return self.results
+    
+    def _save_results(self):
+        """Save experiment results to disk."""
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        experiment_name = f"earlybird_{self.model_name}_{self.dataset_name}_s{self.target_sparsity}_seed{self.seed}"
+        result_dir = self.save_dir / "earlybird" / experiment_name / timestamp
+        result_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Convert numpy arrays to lists for JSON
+        results_serializable = self._make_serializable(self.results)
+        
+        # Save JSON results
+        results_path = result_dir / "results.json"
+        with open(results_path, 'w') as f:
+            json.dump(results_serializable, f, indent=2)
+        
+        # Save summary CSV
+        summary_path = result_dir / "summary.csv"
+        self._save_summary_csv(summary_path)
+        
+        # Save model checkpoints
+        if hasattr(self, 'initial_model_state_dict'):
+            torch.save(self.initial_model_state_dict, result_dir / "initial_model.pt")
+        
+        if hasattr(self, 'final_model_state_dict'):
+            torch.save(self.final_model_state_dict, result_dir / "final_model.pt")
+        
+        # Save channel mask (Early-Bird ticket)
+        if hasattr(self, 'channel_mask'):
+            masks_torch = {k: torch.from_numpy(v) for k, v in self.channel_mask.items()}
+            torch.save(masks_torch, result_dir / "channel_mask.pt")
+        
+        # Save weight mask (expanded from channel mask)
+        if hasattr(self, 'weight_mask'):
+            masks_torch = {k: torch.from_numpy(v) for k, v in self.weight_mask.items()}
+            torch.save(masks_torch, result_dir / "weight_mask.pt")
+        
+        print(f"\nResults saved to: {result_dir}")
+    
+    def _make_serializable(self, obj):
+        """Convert numpy types to Python native types."""
+        if isinstance(obj, dict):
+            return {k: self._make_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._make_serializable(v) for v in obj]
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.float32, np.float64)):
+            return float(obj)
+        elif isinstance(obj, (np.int32, np.int64)):
+            return int(obj)
+        else:
+            return obj
+    
+    def _save_summary_csv(self, path: Path):
+        """Save summary results as CSV."""
+        import csv
+        
+        with open(path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Phase', 'Metric', 'Value'])
+            
+            # Search phase
+            writer.writerow(['Search', 'Converged', self.results['search_phase']['converged']])
+            writer.writerow(['Search', 'Convergence Epoch', self.results['search_phase']['convergence_epoch']])
+            writer.writerow(['Search', 'Final Test Acc', f"{self.results['search_phase']['final_test_acc']:.2f}"])
+            writer.writerow(['Search', 'Channel Sparsity', f"{self.results['search_phase']['channel_sparsity']:.4f}"])
+            
+            # Finetune phase
+            writer.writerow(['Finetune', 'Final Test Acc', f"{self.results['finetune_phase']['final_test_acc']:.2f}"])
+            writer.writerow(['Finetune', 'Final Test Loss', f"{self.results['finetune_phase']['final_test_loss']:.4f}"])
+
+
+def run_earlybird_experiment(
+    model_name: str = "resnet20",
+    dataset_name: str = "cifar10",
+    target_sparsity: float = 0.5,
+    search_epochs: int = 40,
+    finetune_epochs: int = 160,
+    l1_coef: float = 1e-4,
+    seed: int = 42,
+    device: str = "cuda",
+    save_dir: str = "./results"
+) -> Dict[str, Any]:
+    """Convenience function to run a single Early-Bird experiment.
+    
+    This implements the CORRECT Early-Bird algorithm:
+    - Uses BatchNorm γ values for channel importance (NOT weight magnitudes)
+    - Performs channel/filter pruning (NOT individual weight pruning)
+    - Applies L1 regularization on BN γ to encourage sparsity
+    - Checks mask convergence at epoch level: max(last K distances) < ε
+    
+    Args:
+        model_name: Model architecture name (must have BatchNorm layers!)
+        dataset_name: Dataset name
+        target_sparsity: Target CHANNEL sparsity (fraction of channels to prune)
+        search_epochs: Epochs to search for ticket
+        finetune_epochs: Epochs to train with ticket
+        l1_coef: L1 regularization coefficient on BN γ (crucial for Early-Bird!)
+        seed: Random seed
+        device: Compute device
+        save_dir: Results directory
+        
+    Returns:
+        Experiment results dictionary
+    """
+    num_classes = 10 if dataset_name == "cifar10" else 100
+    
+    experiment = EarlyBirdExperiment(
+        model_name=model_name,
+        dataset_name=dataset_name,
+        num_classes=num_classes,
+        target_sparsity=target_sparsity,
+        search_epochs=search_epochs,
+        finetune_epochs=finetune_epochs,
+        l1_coef=l1_coef,
+        seed=seed,
+        device=device,
+        save_dir=save_dir
+    )
+    
+    return experiment.run()
+
+
+def run_quick_earlybird_test():
+    """Run a quick Early-Bird test with reduced parameters for debugging.
+    
+    This tests the CORRECT Early-Bird implementation:
+    - Uses BN γ for channel pruning
+    - L1 regularization on BN γ
+    - Epoch-level convergence check
+    """
+    print("Running quick Early-Bird test (BN γ channel pruning)...")
+    
+    results = run_earlybird_experiment(
+        model_name="resnet20",
+        dataset_name="cifar10",
+        target_sparsity=0.3,  # 30% channels pruned
+        search_epochs=5,  # Reduced search
+        finetune_epochs=5,  # Reduced training
+        l1_coef=1e-4,  # L1 on BN γ
+        seed=42,
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        save_dir="./results"
+    )
+    
+    print("\nQuick Test Results:")
+    print(f"Converged: {results['final_results']['converged']}")
+    if results['final_results']['converged']:
+        print(f"Convergence Epoch: {results['final_results']['convergence_epoch']}")
+    print(f"Search Accuracy: {results['final_results']['search_test_accuracy']:.2f}%")
+    print(f"Final Accuracy: {results['final_results']['final_test_accuracy']:.2f}%")
+    print(f"Channel Sparsity: {results['final_results']['channel_sparsity']:.2%}")
+    
+    return results
+
+
 def run_full_imp_study(config_path: str = "configs/experiment.yaml"):
     """Run the full IMP study across all configurations in the config file.
     
@@ -506,10 +1121,13 @@ def run_quick_imp_test():
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="Run IMP experiments for Lottery Ticket Hypothesis")
+    parser = argparse.ArgumentParser(description="Run pruning experiments for Lottery Ticket Hypothesis")
     parser.add_argument("--mode", type=str, default="single", 
-                       choices=["single", "full", "quick"],
-                       help="Experiment mode: single, full study, or quick test")
+                       choices=["single", "full", "quick", "earlybird", "quick_earlybird"],
+                       help="Experiment mode")
+    parser.add_argument("--method", type=str, default="imp",
+                       choices=["imp", "earlybird"],
+                       help="Pruning method (imp or earlybird)")
     parser.add_argument("--model", type=str, default="resnet20",
                        help="Model architecture")
     parser.add_argument("--dataset", type=str, default="cifar10",
@@ -517,9 +1135,11 @@ if __name__ == "__main__":
     parser.add_argument("--sparsity", type=float, default=0.9,
                        help="Target sparsity")
     parser.add_argument("--iterations", type=int, default=10,
-                       help="Number of pruning iterations")
+                       help="Number of pruning iterations (IMP only)")
     parser.add_argument("--epochs", type=int, default=160,
-                       help="Epochs per iteration")
+                       help="Epochs per iteration (IMP) or finetune epochs (Early-Bird)")
+    parser.add_argument("--search_epochs", type=int, default=40,
+                       help="Search epochs for Early-Bird")
     parser.add_argument("--seed", type=int, default=42,
                        help="Random seed")
     parser.add_argument("--device", type=str, default="cuda",
@@ -531,15 +1151,38 @@ if __name__ == "__main__":
     
     if args.mode == "quick":
         run_quick_imp_test()
-    elif args.mode == "full":
-        run_full_imp_study(args.config)
-    else:
-        run_imp_experiment(
+    elif args.mode == "quick_earlybird":
+        run_quick_earlybird_test()
+    elif args.mode == "earlybird":
+        run_earlybird_experiment(
             model_name=args.model,
             dataset_name=args.dataset,
             target_sparsity=args.sparsity,
-            num_iterations=args.iterations,
-            epochs=args.epochs,
+            search_epochs=args.search_epochs,
+            finetune_epochs=args.epochs,
             seed=args.seed,
             device=args.device
         )
+    elif args.mode == "full":
+        run_full_imp_study(args.config)
+    else:
+        if args.method == "earlybird":
+            run_earlybird_experiment(
+                model_name=args.model,
+                dataset_name=args.dataset,
+                target_sparsity=args.sparsity,
+                search_epochs=args.search_epochs,
+                finetune_epochs=args.epochs,
+                seed=args.seed,
+                device=args.device
+            )
+        else:
+            run_imp_experiment(
+                model_name=args.model,
+                dataset_name=args.dataset,
+                target_sparsity=args.sparsity,
+                num_iterations=args.iterations,
+                epochs=args.epochs,
+                seed=args.seed,
+                device=args.device
+            )

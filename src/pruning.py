@@ -1,6 +1,21 @@
-import numpy as np
-from typing import Dict, Union
+"""
+Pruning utilities for Lottery Ticket Hypothesis experiments.
 
+This module provides:
+1. Iterative Magnitude Pruning (IMP) - the core LTH algorithm
+2. Layer-wise and global magnitude pruning
+3. Mask management utilities
+
+For Early-Bird pruning (channel pruning via BatchNorm γ), see earlybird.py
+"""
+
+import numpy as np
+from typing import Dict, List, Tuple, Optional
+
+
+# =============================================================================
+# Iterative Magnitude Pruning (IMP) - Core LTH Algorithm
+# =============================================================================
 
 def prune_by_percent(
     percents: Dict[str, float],
@@ -205,3 +220,4 @@ def iterative_magnitude_pruning(
             break
     
     return masks_history
+
