@@ -80,6 +80,30 @@ def get_dataloaders(dataset_name, batch_size=128, num_workers=4, val_split=0.1, 
         'test': test_loader
     }
 
+def get_cifar10_dataloaders(batch_size=128, num_workers=4, data_dir='./data'):
+    """
+    Get train and test data loaders for CIFAR-10 (without validation split).
+    
+    Args:
+        batch_size (int): Batch size for loaders
+        num_workers (int): Number of workers for data loading
+        data_dir (str): Directory to store the dataset
+    
+    Returns:
+        tuple: (train_loader, test_loader)
+    """
+    # Get datasets
+    train_dataset = get_dataset('cifar10', train=True, data_dir=data_dir)
+    test_dataset = get_dataset('cifar10', train=False, data_dir=data_dir)
+    
+    # Create data loaders
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                              num_workers=num_workers, pin_memory=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
+                             num_workers=num_workers, pin_memory=True)
+    
+    return train_loader, test_loader
+
 # Example usage
 if __name__ == "__main__":
     # Test the functions
