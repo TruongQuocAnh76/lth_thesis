@@ -330,6 +330,10 @@ class EarlyBirdFinder:
             'total_epochs_recorded': len(self.mask_history),
             'distance_history': self.distance_history.copy(),
             'epoch_history': self.epoch_history.copy(),
+            'target_sparsity': self.target_sparsity,
+            'distance_threshold': self.distance_threshold,
+            'patience': self.patience,
+            'pruning_method': self.pruning_method,
         }
         
         if len(self.distance_history) > 0:
