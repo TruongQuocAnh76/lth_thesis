@@ -105,10 +105,10 @@ class TestCoreIMPCorrectness:
         
         actual_sparsity = get_overall_sparsity(new_masks)
         # Allow small tolerance due to rounding
-        total = weights[layer].size
+        total = sum(w.size for w in weights.values())
         expected_pruned = int(round(target_sparsity * total))
-        actual_pruned = int(np.sum(masks[layer] == 0))
-        assert abs(actual_pruned - expected_pruned) <= 1 , \
+        actual_pruned = sum(int(np.sum(mask == 0)) for mask in new_masks.values())
+        assert abs(actual_pruned - expected_pruned) <= 1, \
         f"Overall sparsity {actual_sparsity} != {target_sparsity}"
     
     def test_pruned_weights_remain_zero_after_optimizer_steps(self):
