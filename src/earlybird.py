@@ -29,9 +29,9 @@ def extract_bn_gammas(model: nn.Module) -> Dict[str, np.ndarray]:
 
 
 def compute_channel_mask_from_bn_gamma(
-    bn_gammas: Dict[str, np.ndarray],
-    target_sparsity: float,
-    pruning_method: str = 'global'
+bn_gammas: Dict[str, np.ndarray],
+target_sparsity: float,
+pruning_method: str = 'global'
 ) -> Dict[str, np.ndarray]:
     """Compute channel pruning mask based on BatchNorm γ values.
     
@@ -49,67 +49,79 @@ def compute_channel_mask_from_bn_gamma(
     # Preserve module traversal order from extract_bn_gammas (named_modules)
     # Python 3.7+ dicts maintain insertion order - don't sort!
     layer_names = list(bn_gammas.keys())
-    
+
     if pruning_method == 'global':
-        # Exact global top-k: flatten with layer offsets, select top-k globally, reconstruct
-        # This ensures exact reproducibility and matches the paper's reported sparsities
-        
-        # Build flattened array with offsets: (gamma_value, layer_idx, channel_idx)
+        # Build flattened list of (value, layer_idx, ch_idx)
         flattened = []
-        layer_offsets = {}
-        offset = 0
-        
+        layer_sizes = []
         for layer_idx, name in enumerate(layer_names):
-            gamma_abs = np.abs(bn_gammas[name])
-            layer_offsets[name] = offset
-            
+            gamma_abs = np.abs(bn_gammas[name]).astype(float)
+            layer_sizes.append(len(gamma_abs))
             for ch_idx, val in enumerate(gamma_abs):
-                flattened.append((val, layer_idx, ch_idx, name))
-            offset += len(gamma_abs)
-        
-        num_total = len(flattened)
-        num_keep = int(num_total * (1 - target_sparsity))
-        num_keep = max(1, num_keep)
-        
-        # Sort by gamma value (descending) and take top-k
-        flattened_sorted = sorted(flattened, key=lambda x: x[0], reverse=True)
-        top_k_indices = set()
-        for i in range(num_keep):
-            _, layer_idx, ch_idx, name = flattened_sorted[i]
-            top_k_indices.add((layer_idx, ch_idx))
-        
-        # Reconstruct per-layer masks from top-k global indices
-        masks = {}
+                flattened.append((val, layer_idx, ch_idx))
+
+        total_channels = len(flattened)
+        # Compute how many channels to keep globally (use round for consistency)
+        num_keep = max(1, int(round(total_channels * (1.0 - target_sparsity))))
+
+        num_layers = len(layer_names)
+        # Ensure we can reserve at least one per layer
+        if num_keep < num_layers:
+            num_keep = num_layers
+
+        # Step 1: reserve best channel per layer
+        reserved = set()  # (layer_idx, ch_idx)
         for layer_idx, name in enumerate(layer_names):
-            gamma_len = len(bn_gammas[name])
-            mask = np.zeros(gamma_len, dtype=np.float32)
-            
-            for ch_idx in range(gamma_len):
-                if (layer_idx, ch_idx) in top_k_indices:
-                    mask[ch_idx] = 1.0
-            
+            gamma_abs = np.abs(bn_gammas[name]).astype(float)
+            if gamma_abs.size == 0:
+                continue
+            best_ch = int(np.argmax(gamma_abs))
+            reserved.add((layer_idx, best_ch))
+
+        # Step 2: pick remaining channels globally, excluding reserved
+        remaining_to_pick = num_keep - len(reserved)
+        if remaining_to_pick > 0:
+            # Build candidate list excluding reserved
+            candidates = []
+            for val, layer_idx, ch_idx in flattened:
+                if (layer_idx, ch_idx) in reserved:
+                    continue
+                candidates.append((val, layer_idx, ch_idx))
+            # sort candidates descending and take top remaining_to_pick
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            for i in range(min(remaining_to_pick, len(candidates))):
+                _, li, ci = candidates[i]
+                reserved.add((li, ci))
+
+        # Reconstruct per-layer masks
+        masks: Dict[str, np.ndarray] = {}
+        for layer_idx, name in enumerate(layer_names):
+            size = layer_sizes[layer_idx]
+            mask = np.zeros(size, dtype=np.float32)
+            for ch in range(size):
+                if (layer_idx, ch) in reserved:
+                    mask[ch] = 1.0
             masks[name] = mask
+
+        return masks
+
     else:
-        # Per-layer threshold
+        # Per-layer exact top-k (unchanged)
         masks = {}
         for name in layer_names:
-            gamma = np.abs(bn_gammas[name])
+            gamma = np.abs(bn_gammas[name]).astype(float)
             num_channels = len(gamma)
-            num_keep = int(num_channels * (1 - target_sparsity))
+            num_keep = int(round(num_channels * (1.0 - target_sparsity)))
             num_keep = max(1, num_keep)
-            
             if num_keep < num_channels:
-                # Exact top-k: sort and take top-k
                 sorted_indices = np.argsort(gamma)[::-1]  # descending
                 mask = np.zeros(num_channels, dtype=np.float32)
                 mask[sorted_indices[:num_keep]] = 1.0
             else:
                 mask = np.ones(num_channels, dtype=np.float32)
-            
             masks[name] = mask
-    
-    return masks
-
+        return masks
+ 
 
 def compute_channel_mask_hamming_distance(
     mask1: Dict[str, np.ndarray],
