@@ -1118,6 +1118,68 @@ def run_quick_imp_test():
     return results
 
 
+def _convert_to_serializable(obj):
+    """Convert numpy types to Python native types for JSON serialization."""
+    if isinstance(obj, dict):
+        return {k: _convert_to_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_to_serializable(v) for v in obj]
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, (np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, (np.int32, np.int64)):
+        return int(obj)
+    else:
+        return obj
+
+
+def _save_earlybird_search_csv(path: Path, history: Dict):
+    """Save Early-Bird search phase history as CSV."""
+    import csv
+    
+    with open(path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        # Header
+        writer.writerow([
+            'epoch', 'train_loss', 'train_acc', 'test_loss', 'test_acc', 'mask_distance', 'lr'
+        ])
+        # Data rows
+        if isinstance(history.get('epoch'), list):
+            for i in range(len(history['epoch'])):
+                writer.writerow([
+                    history['epoch'][i],
+                    f"{history['train_loss'][i]:.4f}" if i < len(history.get('train_loss', [])) else '',
+                    f"{history['train_acc'][i]:.2f}" if i < len(history.get('train_acc', [])) else '',
+                    f"{history['test_loss'][i]:.4f}" if i < len(history.get('test_loss', [])) else '',
+                    f"{history['test_acc'][i]:.2f}" if i < len(history.get('test_acc', [])) else '',
+                    f"{history['mask_distance'][i]:.4f}" if i < len(history.get('mask_distance', [])) else '',
+                    f"{history['lr'][i]:.6f}" if i < len(history.get('lr', [])) else '',
+                ])
+
+
+def _save_earlybird_finetune_csv(path: Path, history: Dict):
+    """Save Early-Bird fine-tuning phase history as CSV."""
+    import csv
+    
+    with open(path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        # Header
+        writer.writerow([
+            'epoch', 'train_loss', 'train_acc', 'test_loss', 'test_acc'
+        ])
+        # Data rows
+        if isinstance(history.get('epoch'), list):
+            for i in range(len(history['epoch'])):
+                writer.writerow([
+                    history['epoch'][i],
+                    f"{history['train_loss'][i]:.4f}" if i < len(history.get('train_loss', [])) else '',
+                    f"{history['train_acc'][i]:.2f}" if i < len(history.get('train_acc', [])) else '',
+                    f"{history['test_loss'][i]:.4f}" if i < len(history.get('test_loss', [])) else '',
+                    f"{history['test_acc'][i]:.2f}" if i < len(history.get('test_acc', [])) else '',
+                ])
+
+
 def run_experiment(
     algorithm: str,
     model: str,
@@ -1292,11 +1354,12 @@ def run_experiment(
             verbose=verbose
         )
         
-        # Save results
+        # Save results in same format as IMP
         save_dir = Path("./results")
-        save_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"earlybird_resnet_{dataset}_{model}_s{target_sparsity:.2f}_{timestamp}.json"
+        experiment_name = f"earlybird_resnet_{model}_{dataset}_s{target_sparsity:.2f}_seed{seed}"
+        result_dir = save_dir / "earlybird_resnet" / experiment_name / timestamp
+        result_dir.mkdir(parents=True, exist_ok=True)
         
         # Prepare results for saving (exclude model and tensors)
         save_results = {
@@ -1318,20 +1381,34 @@ def run_experiment(
                 'patience': patience,
                 'pruning_method': pruning_method,
             },
-            'converged': results.get('converged', False),
-            'convergence_epoch': results.get('convergence_epoch', None),
-            'best_test_acc': results.get('best_test_acc', None),
-            'test_acc_pruned': results.get('test_acc_pruned', None),
-            'actual_sparsity': results.get('actual_sparsity', None),
-            'history': results.get('history', {}),
-            'finetune_history': results.get('finetune_history', {}),
-            'eb_stats': results.get('eb_stats', {}),
+            'final_results': {
+                'converged': results.get('converged', False),
+                'convergence_epoch': results.get('convergence_epoch', None),
+                'best_test_accuracy': results.get('best_test_acc', None),
+                'test_accuracy_at_convergence': results.get('test_acc_pruned', None),
+                'final_sparsity': results.get('actual_sparsity', None),
+            },
+            'search_history': _convert_to_serializable(results.get('history', {})),
+            'finetune_history': _convert_to_serializable(results.get('finetune_history', {})),
+            'eb_stats': _convert_to_serializable(results.get('eb_stats', {})),
         }
         
-        with open(save_dir / filename, 'w') as f:
+        # Save JSON results
+        results_path = result_dir / "results.json"
+        with open(results_path, 'w') as f:
             json.dump(save_results, f, indent=2)
         
-        print(f"\nResults saved to: {save_dir / filename}")
+        # Save summary CSV (search phase)
+        if results.get('history'):
+            summary_path = result_dir / "search_summary.csv"
+            _save_earlybird_search_csv(summary_path, results['history'])
+        
+        # Save summary CSV (finetune phase)
+        if results.get('finetune_history'):
+            summary_path = result_dir / "finetune_summary.csv"
+            _save_earlybird_finetune_csv(summary_path, results['finetune_history'])
+        
+        print(f"\nResults saved to: {result_dir}")
         return results
     
     else:
