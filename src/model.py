@@ -90,6 +90,35 @@ class ResNet(nn.Module):
         out = out.view(out.size(0), -1)
         out = self.linear(out)
         return out
+    
+    def get_block_info(self):
+        """Get information about residual blocks for block-wise pruning.
+        
+        Returns block structure needed for Early-Bird:
+        - Authority BN (bn2 in each block - the one before residual add)
+        - Both convs in the block
+        - Skip conv (if exists)
+        """
+        blocks = []
+        
+        for stage_name in ['layer1', 'layer2', 'layer3']:
+            stage = getattr(self, stage_name)
+            for block_idx, block in enumerate(stage):
+                block_info = {
+                    'name': f'{stage_name}.{block_idx}',
+                    'authority_bn': f'{stage_name}.{block_idx}.bn2',  # BN before residual add
+                    'conv1': f'{stage_name}.{block_idx}.conv1',
+                    'bn1': f'{stage_name}.{block_idx}.bn1',
+                    'conv2': f'{stage_name}.{block_idx}.conv2',
+                    'bn2': f'{stage_name}.{block_idx}.bn2',
+                    'has_shortcut': len(block.shortcut) > 0,
+                }
+                if block_info['has_shortcut']:
+                    block_info['shortcut_conv'] = f'{stage_name}.{block_idx}.shortcut.0'
+                    block_info['shortcut_bn'] = f'{stage_name}.{block_idx}.shortcut.1'
+                blocks.append(block_info)
+        
+        return blocks
 
 
 def resnet20(num_classes=10):

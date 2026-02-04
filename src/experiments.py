@@ -1118,71 +1118,383 @@ def run_quick_imp_test():
     return results
 
 
+def run_experiment(
+    algorithm: str,
+    model: str,
+    dataset: str,
+    seed: int = 42,
+    device: str = "cuda",
+    **kwargs
+) -> Dict[str, Any]:
+    """Unified experiment runner supporting multiple algorithms.
+    
+    Args:
+        algorithm: Algorithm to use ('imp', 'earlybird', 'earlybird_resnet')
+        model: Model architecture ('resnet20', 'vgg16', etc.)
+        dataset: Dataset name ('cifar10', 'mnist', etc.)
+        seed: Random seed for reproducibility
+        device: Device to use ('cuda' or 'cpu')
+        **kwargs: Algorithm-specific arguments
+        
+    Algorithm-specific kwargs:
+        IMP:
+            - target_sparsity (float): Target final sparsity (default: 0.9)
+            - num_iterations (int): Number of pruning iterations (default: 10)
+            - epochs_per_iteration (int): Training epochs per round (default: 160)
+            - batch_size (int): Batch size (default: 128)
+            - learning_rate (float): Initial learning rate (default: 0.1)
+            - momentum (float): SGD momentum (default: 0.9)
+            - weight_decay (float): Weight decay (default: 5e-4)
+            - use_global_pruning (bool): Global vs layerwise pruning (default: True)
+            - warmup_epochs (int): Warmup epochs (default: 5)
+            
+        Early-Bird (VGG):
+            - target_sparsity (float): Target channel sparsity (default: 0.5)
+            - search_epochs (int): Max epochs for ticket search (default: 160)
+            - finetune_epochs (int): Fine-tuning epochs (default: 160)
+            - batch_size (int): Batch size (default: 256)
+            - learning_rate (float): Initial learning rate (default: 0.1)
+            - momentum (float): SGD momentum (default: 0.9)
+            - weight_decay (float): Weight decay (default: 1e-4)
+            - l1_coef (float): L1 regularization for BN gamma (default: 1e-4)
+            - distance_threshold (float): Convergence threshold (default: 0.1)
+            - patience (int): Convergence window (default: 5)
+            - pruning_method (str): 'global' or 'layerwise' (default: 'global')
+            
+        Early-Bird ResNet:
+            - Same as Early-Bird VGG (uses block-wise pruning)
+    
+    Returns:
+        Dictionary containing experiment results
+    """
+    print(f"\n{'='*80}")
+    print(f"Running Experiment")
+    print(f"Algorithm: {algorithm.upper()}")
+    print(f"Model: {model}")
+    print(f"Dataset: {dataset}")
+    print(f"Seed: {seed}")
+    print(f"Device: {device}")
+    print(f"{'='*80}\n")
+    
+    if algorithm.lower() == "imp":
+        # IMP-specific parameters
+        target_sparsity = kwargs.get('target_sparsity', 0.9)
+        num_iterations = kwargs.get('num_iterations', 10)
+        epochs_per_iteration = kwargs.get('epochs_per_iteration', 160)
+        batch_size = kwargs.get('batch_size', 128)
+        learning_rate = kwargs.get('learning_rate', 0.1)
+        momentum = kwargs.get('momentum', 0.9)
+        weight_decay = kwargs.get('weight_decay', 5e-4)
+        use_global_pruning = kwargs.get('use_global_pruning', True)
+        warmup_epochs = kwargs.get('warmup_epochs', 5)
+        
+        # Determine number of classes from dataset
+        num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
+        
+        experiment = IMPExperiment(
+            model_name=model,
+            dataset_name=dataset,
+            num_classes=num_classes,
+            target_sparsity=target_sparsity,
+            num_iterations=num_iterations,
+            epochs_per_iteration=epochs_per_iteration,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            momentum=momentum,
+            weight_decay=weight_decay,
+            seed=seed,
+            device=device,
+            use_global_pruning=use_global_pruning,
+            warmup_epochs=warmup_epochs
+        )
+        return experiment.run()
+    
+    elif algorithm.lower() == "earlybird":
+        # Early-Bird VGG parameters
+        target_sparsity = kwargs.get('target_sparsity', 0.5)
+        search_epochs = kwargs.get('search_epochs', 160)
+        finetune_epochs = kwargs.get('finetune_epochs', 160)
+        batch_size = kwargs.get('batch_size', 256)
+        learning_rate = kwargs.get('learning_rate', 0.1)
+        momentum = kwargs.get('momentum', 0.9)
+        weight_decay = kwargs.get('weight_decay', 1e-4)
+        l1_coef = kwargs.get('l1_coef', 1e-4)
+        distance_threshold = kwargs.get('distance_threshold', 0.1)
+        patience = kwargs.get('patience', 5)
+        pruning_method = kwargs.get('pruning_method', 'global')
+        
+        num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
+        
+        experiment = EarlyBirdExperiment(
+            model_name=model,
+            dataset_name=dataset,
+            num_classes=num_classes,
+            target_sparsity=target_sparsity,
+            search_epochs=search_epochs,
+            finetune_epochs=finetune_epochs,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            momentum=momentum,
+            weight_decay=weight_decay,
+            l1_coef=l1_coef,
+            distance_threshold=distance_threshold,
+            patience=patience,
+            pruning_method=pruning_method,
+            seed=seed,
+            device=device
+        )
+        return experiment.run()
+    
+    elif algorithm.lower() == "earlybird_resnet":
+        # Early-Bird ResNet with block-wise pruning
+        from src.train import train_resnet20_earlybird
+        from src.data import get_dataloaders
+        
+        target_sparsity = kwargs.get('target_sparsity', 0.5)
+        total_epochs = kwargs.get('total_epochs', 160)
+        batch_size = kwargs.get('batch_size', 128)
+        learning_rate = kwargs.get('learning_rate', 0.1)
+        lr_milestones = kwargs.get('lr_milestones', [80, 120])
+        lr_gamma = kwargs.get('lr_gamma', 0.1)
+        momentum = kwargs.get('momentum', 0.9)
+        weight_decay = kwargs.get('weight_decay', 1e-4)
+        l1_coef = kwargs.get('l1_coef', 1e-4)
+        distance_threshold = kwargs.get('distance_threshold', 0.1)
+        patience = kwargs.get('patience', 5)
+        pruning_method = kwargs.get('pruning_method', 'global')
+        verbose = kwargs.get('verbose', True)
+        
+        # Set seed
+        set_seed(seed)
+        
+        # Load data
+        loaders = get_dataloaders(dataset, batch_size=batch_size, num_workers=4)
+        train_loader = loaders['train']
+        test_loader = loaders['test']
+        
+        # Run experiment
+        device_obj = torch.device(device if torch.cuda.is_available() else "cpu")
+        results = train_resnet20_earlybird(
+            train_loader=train_loader,
+            test_loader=test_loader,
+            device=device_obj,
+            target_sparsity=target_sparsity,
+            total_epochs=total_epochs,
+            initial_lr=learning_rate,
+            lr_milestones=lr_milestones,
+            lr_gamma=lr_gamma,
+            momentum=momentum,
+            weight_decay=weight_decay,
+            l1_coef=l1_coef,
+            distance_threshold=distance_threshold,
+            patience=patience,
+            pruning_method=pruning_method,
+            verbose=verbose
+        )
+        
+        # Save results
+        save_dir = Path("./results")
+        save_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"earlybird_resnet_{dataset}_{model}_s{target_sparsity:.2f}_{timestamp}.json"
+        
+        # Prepare results for saving (exclude model and tensors)
+        save_results = {
+            'config': {
+                'algorithm': algorithm,
+                'model': model,
+                'dataset': dataset,
+                'seed': seed,
+                'target_sparsity': target_sparsity,
+                'total_epochs': total_epochs,
+                'batch_size': batch_size,
+                'learning_rate': learning_rate,
+                'lr_milestones': lr_milestones,
+                'lr_gamma': lr_gamma,
+                'momentum': momentum,
+                'weight_decay': weight_decay,
+                'l1_coef': l1_coef,
+                'distance_threshold': distance_threshold,
+                'patience': patience,
+                'pruning_method': pruning_method,
+            },
+            'converged': results.get('converged', False),
+            'convergence_epoch': results.get('convergence_epoch', None),
+            'best_test_acc': results.get('best_test_acc', None),
+            'test_acc_pruned': results.get('test_acc_pruned', None),
+            'actual_sparsity': results.get('actual_sparsity', None),
+            'history': results.get('history', {}),
+            'finetune_history': results.get('finetune_history', {}),
+            'eb_stats': results.get('eb_stats', {}),
+        }
+        
+        with open(save_dir / filename, 'w') as f:
+            json.dump(save_results, f, indent=2)
+        
+        print(f"\nResults saved to: {save_dir / filename}")
+        return results
+    
+    else:
+        raise ValueError(f"Unknown algorithm: {algorithm}. Choose from: imp, earlybird, earlybird_resnet")
+
+
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="Run pruning experiments for Lottery Ticket Hypothesis")
-    parser.add_argument("--mode", type=str, default="single", 
-                       choices=["single", "full", "quick", "earlybird", "quick_earlybird"],
-                       help="Experiment mode")
-    parser.add_argument("--method", type=str, default="imp",
-                       choices=["imp", "earlybird"],
-                       help="Pruning method (imp or earlybird)")
+    parser = argparse.ArgumentParser(
+        description="Run pruning experiments for Lottery Ticket Hypothesis",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Run IMP on ResNet20 with CIFAR-10
+  python -m src.experiments --algorithm imp --model resnet20 --dataset cifar10 --seed 42 \\
+      --target_sparsity 0.9 --num_iterations 10 --epochs_per_iteration 160
+
+  # Run Early-Bird on VGG16 with CIFAR-10
+  python -m src.experiments --algorithm earlybird --model vgg16 --dataset cifar10 --seed 42 \\
+      --target_sparsity 0.5 --search_epochs 160 --finetune_epochs 160
+
+  # Run Early-Bird on ResNet20 with CIFAR-10 (block-wise pruning)
+  python -m src.experiments --algorithm earlybird_resnet --model resnet20 --dataset cifar10 --seed 42 \\
+      --target_sparsity 0.5 --total_epochs 160 --l1_coef 1e-4
+
+  # Quick test modes
+  python -m src.experiments --mode quick_imp
+  python -m src.experiments --mode quick_earlybird
+        """
+    )
+    
+    # Main arguments
+    parser.add_argument("--algorithm", type=str, default="imp",
+                       choices=["imp", "earlybird", "earlybird_resnet"],
+                       help="Pruning algorithm to use")
     parser.add_argument("--model", type=str, default="resnet20",
-                       help="Model architecture")
+                       help="Model architecture (resnet20, vgg16, etc.)")
     parser.add_argument("--dataset", type=str, default="cifar10",
-                       help="Dataset name")
-    parser.add_argument("--sparsity", type=float, default=0.9,
-                       help="Target sparsity")
-    parser.add_argument("--iterations", type=int, default=10,
-                       help="Number of pruning iterations (IMP only)")
-    parser.add_argument("--epochs", type=int, default=160,
-                       help="Epochs per iteration (IMP) or finetune epochs (Early-Bird)")
-    parser.add_argument("--search_epochs", type=int, default=40,
-                       help="Search epochs for Early-Bird")
+                       help="Dataset name (cifar10, cifar100, mnist)")
     parser.add_argument("--seed", type=int, default=42,
-                       help="Random seed")
+                       help="Random seed for reproducibility")
     parser.add_argument("--device", type=str, default="cuda",
-                       help="Device (cuda or cpu)")
-    parser.add_argument("--config", type=str, default="configs/experiment.yaml",
-                       help="Config file path")
+                       help="Device to use (cuda or cpu)")
+    
+    # Special modes
+    parser.add_argument("--mode", type=str, default=None,
+                       choices=["quick_imp", "quick_earlybird", "full"],
+                       help="Quick test or full experiment mode")
+    
+    # IMP-specific arguments
+    imp_group = parser.add_argument_group('IMP arguments')
+    imp_group.add_argument("--target_sparsity", type=float, default=0.9,
+                          help="Target final sparsity (IMP)")
+    imp_group.add_argument("--num_iterations", type=int, default=10,
+                          help="Number of pruning iterations (IMP)")
+    imp_group.add_argument("--epochs_per_iteration", type=int, default=160,
+                          help="Training epochs per iteration (IMP)")
+    imp_group.add_argument("--use_global_pruning", action="store_true", default=True,
+                          help="Use global magnitude pruning (IMP)")
+    imp_group.add_argument("--warmup_epochs", type=int, default=5,
+                          help="Warmup epochs (IMP)")
+    
+    # Early-Bird common arguments
+    eb_group = parser.add_argument_group('Early-Bird arguments')
+    eb_group.add_argument("--search_epochs", type=int, default=160,
+                         help="Max search epochs (Early-Bird)")
+    eb_group.add_argument("--finetune_epochs", type=int, default=160,
+                         help="Fine-tuning epochs (Early-Bird)")
+    eb_group.add_argument("--total_epochs", type=int, default=160,
+                         help="Total epochs (Early-Bird ResNet)")
+    eb_group.add_argument("--l1_coef", type=float, default=1e-4,
+                         help="L1 coefficient for BN gamma (Early-Bird)")
+    eb_group.add_argument("--distance_threshold", type=float, default=0.1,
+                         help="Convergence threshold (Early-Bird)")
+    eb_group.add_argument("--patience", type=int, default=5,
+                         help="Convergence window (Early-Bird)")
+    eb_group.add_argument("--pruning_method", type=str, default="global",
+                         choices=["global", "layerwise"],
+                         help="Pruning method (Early-Bird)")
+    
+    # Common training arguments
+    train_group = parser.add_argument_group('Training arguments')
+    train_group.add_argument("--batch_size", type=int, default=None,
+                            help="Batch size (default: 128 for IMP, 256 for Early-Bird)")
+    train_group.add_argument("--learning_rate", type=float, default=0.1,
+                            help="Initial learning rate")
+    train_group.add_argument("--momentum", type=float, default=0.9,
+                            help="SGD momentum")
+    train_group.add_argument("--weight_decay", type=float, default=None,
+                            help="Weight decay (default: 5e-4 for IMP, 1e-4 for Early-Bird)")
+    train_group.add_argument("--lr_milestones", type=int, nargs="+", default=[80, 120],
+                            help="Learning rate milestones (Early-Bird ResNet)")
+    train_group.add_argument("--lr_gamma", type=float, default=0.1,
+                            help="Learning rate gamma (Early-Bird ResNet)")
     
     args = parser.parse_args()
     
-    if args.mode == "quick":
+    # Handle quick test modes
+    if args.mode == "quick_imp":
         run_quick_imp_test()
     elif args.mode == "quick_earlybird":
         run_quick_earlybird_test()
-    elif args.mode == "earlybird":
-        run_earlybird_experiment(
-            model_name=args.model,
-            dataset_name=args.dataset,
-            target_sparsity=args.sparsity,
-            search_epochs=args.search_epochs,
-            finetune_epochs=args.epochs,
-            seed=args.seed,
-            device=args.device
-        )
     elif args.mode == "full":
-        run_full_imp_study(args.config)
+        run_full_imp_study()
     else:
-        if args.method == "earlybird":
-            run_earlybird_experiment(
-                model_name=args.model,
-                dataset_name=args.dataset,
-                target_sparsity=args.sparsity,
-                search_epochs=args.search_epochs,
-                finetune_epochs=args.epochs,
-                seed=args.seed,
-                device=args.device
-            )
-        else:
-            run_imp_experiment(
-                model_name=args.model,
-                dataset_name=args.dataset,
-                target_sparsity=args.sparsity,
-                num_iterations=args.iterations,
-                epochs=args.epochs,
-                seed=args.seed,
-                device=args.device
-            )
+        # Build kwargs based on algorithm
+        kwargs = {}
+        
+        if args.algorithm == "imp":
+            kwargs['target_sparsity'] = args.target_sparsity
+            kwargs['num_iterations'] = args.num_iterations
+            kwargs['epochs_per_iteration'] = args.epochs_per_iteration
+            kwargs['use_global_pruning'] = args.use_global_pruning
+            kwargs['warmup_epochs'] = args.warmup_epochs
+            kwargs['batch_size'] = args.batch_size if args.batch_size else 128
+            kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 5e-4
+            
+        elif args.algorithm == "earlybird":
+            kwargs['target_sparsity'] = args.target_sparsity if args.target_sparsity != 0.9 else 0.5
+            kwargs['search_epochs'] = args.search_epochs
+            kwargs['finetune_epochs'] = args.finetune_epochs
+            kwargs['l1_coef'] = args.l1_coef
+            kwargs['distance_threshold'] = args.distance_threshold
+            kwargs['patience'] = args.patience
+            kwargs['pruning_method'] = args.pruning_method
+            kwargs['batch_size'] = args.batch_size if args.batch_size else 256
+            kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 1e-4
+            
+        elif args.algorithm == "earlybird_resnet":
+            kwargs['target_sparsity'] = args.target_sparsity if args.target_sparsity != 0.9 else 0.5
+            kwargs['total_epochs'] = args.total_epochs
+            kwargs['lr_milestones'] = args.lr_milestones
+            kwargs['lr_gamma'] = args.lr_gamma
+            kwargs['l1_coef'] = args.l1_coef
+            kwargs['distance_threshold'] = args.distance_threshold
+            kwargs['patience'] = args.patience
+            kwargs['pruning_method'] = args.pruning_method
+            kwargs['batch_size'] = args.batch_size if args.batch_size else 128
+            kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 1e-4
+        
+        # Common arguments
+        kwargs['learning_rate'] = args.learning_rate
+        kwargs['momentum'] = args.momentum
+        
+        # Run experiment
+        results = run_experiment(
+            algorithm=args.algorithm,
+            model=args.model,
+            dataset=args.dataset,
+            seed=args.seed,
+            device=args.device,
+            **kwargs
+        )
+        
+        # Print summary
+        print(f"\n{'='*80}")
+        print("Experiment Complete!")
+        if args.algorithm == "earlybird_resnet":
+            if results.get('converged'):
+                print(f"Converged at epoch: {results['convergence_epoch']}")
+                print(f"Best test accuracy: {results['best_test_acc']:.2f}%")
+                print(f"Actual sparsity: {results['actual_sparsity']:.2f}%")
+            else:
+                print("Did not converge within epoch limit")
+        print(f"{'='*80}\n")

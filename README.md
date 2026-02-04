@@ -3,6 +3,126 @@
 1. **Adaptive Hybrid Pruning with Dynamic Switching** (Cải Tiến Pruning Hybrid Thích Ứng Để Tìm Vé Số May Mắn Trong Mạng Nơ-ron Sâu): cải tiến phương pháp hybrid oneshot - iterative pruning của Janusz et al. (2025) bằng cách tìm phương pháp giúp threshold chuyển từ oneshot sang iterative adaptive thay vì sử dụng 1 constant.
 2. **Comparative Study of Pruning Methods Related to the Lottery Ticket Hypothesis** (So sánh các Phương pháp Pruning liên quan đến Giả thuyết Vé Số): thử nghiệm và so sánh <= 8 thuật toán pruning. (nếu cải tiến không khả quan)
 
+# Usage
+
+This project implements multiple pruning algorithms for the Lottery Ticket Hypothesis. You can run experiments using the unified command-line interface.
+
+## Installation
+
+```bash
+pip install torch torchvision tqdm numpy
+```
+
+## Running Experiments
+
+### 1. Iterative Magnitude Pruning (IMP)
+
+```bash
+python -m src.experiments --algorithm imp \
+    --model resnet20 \
+    --dataset cifar10 \
+    --seed 42 \
+    --target_sparsity 0.9 \
+    --num_iterations 10 \
+    --epochs_per_iteration 160
+```
+
+**Available IMP arguments:**
+- `--target_sparsity`: Target final sparsity (default: 0.9)
+- `--num_iterations`: Number of pruning iterations (default: 10)
+- `--epochs_per_iteration`: Training epochs per iteration (default: 160)
+- `--use_global_pruning`: Use global magnitude pruning (default: True)
+- `--warmup_epochs`: Warmup epochs (default: 5)
+
+### 2. Early-Bird (Channel Pruning with BN γ)
+
+#### VGG Models:
+```bash
+python -m src.experiments --algorithm earlybird \
+    --model vgg16 \
+    --dataset cifar10 \
+    --seed 42 \
+    --target_sparsity 0.5 \
+    --search_epochs 160 \
+    --finetune_epochs 160
+```
+
+#### ResNet (Block-wise Pruning):
+```bash
+python -m src.experiments --algorithm earlybird_resnet \
+    --model resnet20 \
+    --dataset cifar10 \
+    --seed 42 \
+    --target_sparsity 0.5 \
+    --total_epochs 160 \
+    --l1_coef 1e-4
+```
+
+**Available Early-Bird arguments:**
+- `--target_sparsity`: Target channel sparsity (default: 0.5)
+- `--search_epochs` / `--total_epochs`: Max epochs for ticket search
+- `--finetune_epochs`: Fine-tuning epochs (default: 160)
+- `--l1_coef`: L1 regularization for BN γ (default: 1e-4)
+- `--distance_threshold`: Convergence threshold (default: 0.1)
+- `--patience`: Convergence window size (default: 5)
+- `--pruning_method`: 'global' or 'layerwise' (default: 'global')
+
+### 3. Common Arguments
+
+All algorithms support:
+- `--model`: Model architecture (resnet20, resnet50, vgg16)
+- `--dataset`: Dataset (cifar10, cifar100, mnist)
+- `--seed`: Random seed (default: 42)
+- `--device`: cuda or cpu (default: cuda)
+- `--batch_size`: Training batch size
+- `--learning_rate`: Initial learning rate (default: 0.1)
+- `--momentum`: SGD momentum (default: 0.9)
+- `--weight_decay`: Weight decay
+
+### 4. Quick Tests
+
+Run quick tests with reduced iterations (for validation):
+```bash
+python -m src.experiments --mode quick_imp
+python -m src.experiments --mode quick_earlybird
+```
+
+## Examples
+
+**IMP: Prune ResNet20 to 90% sparsity**
+```bash
+python -m src.experiments --algorithm imp --model resnet20 --dataset cifar10 \
+    --target_sparsity 0.9 --num_iterations 10
+```
+
+**Early-Bird: Find ResNet20 lottery tickets at 50% sparsity**
+```bash
+python -m src.experiments --algorithm earlybird_resnet --model resnet20 --dataset cifar10 \
+    --target_sparsity 0.5 --l1_coef 1e-4 --distance_threshold 0.1
+```
+
+**Early-Bird: VGG16 on CIFAR-100**
+```bash
+python -m src.experiments --algorithm earlybird --model vgg16 --dataset cifar100 \
+    --target_sparsity 0.7 --search_epochs 160
+```
+
+## Output
+
+Results are saved to `./results/` with timestamps:
+```
+results/
+├── earlybird_resnet_cifar10_resnet20_s0.50_20260204_120530.json
+├── imp_cifar10_resnet20_s0.90_20260204_121045.json
+└── ...
+```
+
+Each result file contains:
+- Algorithm configuration
+- Convergence information (Early-Bird)
+- Training history
+- Final accuracies and sparsity metrics
+
 # Kế hoạch
 
 ## Tháng 1: Tháng 12/2025
