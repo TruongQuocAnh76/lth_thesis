@@ -1326,6 +1326,9 @@ def run_experiment(
         pruning_method = kwargs.get('pruning_method', 'global')
         verbose = kwargs.get('verbose', True)
         
+        # Determine number of classes from dataset
+        num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
+        
         # Set seed
         set_seed(seed)
         
@@ -1340,6 +1343,7 @@ def run_experiment(
             train_loader=train_loader,
             test_loader=test_loader,
             device=device_obj,
+            num_classes=num_classes,
             target_sparsity=target_sparsity,
             total_epochs=total_epochs,
             initial_lr=learning_rate,

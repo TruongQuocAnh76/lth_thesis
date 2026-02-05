@@ -419,6 +419,7 @@ def train_resnet20_earlybird(
     train_loader: DataLoader,
     test_loader: DataLoader,
     device: torch.device,
+    num_classes: int = 10,
     target_sparsity: float = 0.5,
     total_epochs: int = 160,
     initial_lr: float = 0.1,
@@ -432,16 +433,17 @@ def train_resnet20_earlybird(
     pruning_method: str = 'global',
     verbose: bool = True
 ) -> Dict[str, Any]:
-    """Train ResNet20 on CIFAR-10 with Early-Bird ticket discovery.
+    """Train ResNet20 with Early-Bird ticket discovery.
     
     Implements block-wise channel pruning for ResNet:
     - Uses bn2 (before residual add) as authority for each block
     - Applies same mask to conv1, conv2, and shortcut conv
     
     Args:
-        train_loader: DataLoader for CIFAR-10 training data
-        test_loader: DataLoader for CIFAR-10 test data
+        train_loader: DataLoader for training data
+        test_loader: DataLoader for test data
         device: Device (cuda/cpu)
+        num_classes: Number of output classes (default: 10 for CIFAR-10)
         target_sparsity: Fraction of channels to prune (0.3, 0.5, 0.7)
         total_epochs: Maximum training epochs
         initial_lr: Initial learning rate
@@ -468,7 +470,7 @@ def train_resnet20_earlybird(
     from src.model import resnet20
     
     # Initialize model
-    model = resnet20(num_classes=10).to(device)
+    model = resnet20(num_classes=num_classes).to(device)
     
     # Setup optimizer, scheduler, criterion
     optimizer = optim.SGD(
