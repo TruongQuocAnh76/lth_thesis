@@ -106,20 +106,66 @@ pruning_method: str = 'global'
         return masks
 
     else:
-        # Per-layer exact top-k (unchanged)
+        # Per-layer top-k with global correction to match target sparsity.
+        # Step 1: Compute per-layer keep counts via rounding
+        total_channels = sum(len(bn_gammas[n]) for n in layer_names)
+        desired_keep = max(len(layer_names), int(round(total_channels * (1.0 - target_sparsity))))
+
+        per_layer_keep = {}
+        for name in layer_names:
+            num_channels = len(bn_gammas[name])
+            k = int(round(num_channels * (1.0 - target_sparsity)))
+            k = max(1, min(k, num_channels))
+            per_layer_keep[name] = k
+
+        # Step 2: Build initial per-layer masks from rounded keep counts
+        # Also collect (|γ|, layer_name, ch_idx, kept_flag) for global adjustment
         masks = {}
+        kept_entries = []   # (|γ|, layer_name, ch_idx) — currently kept
+        pruned_entries = [] # (|γ|, layer_name, ch_idx) — currently pruned
         for name in layer_names:
             gamma = np.abs(bn_gammas[name]).astype(float)
             num_channels = len(gamma)
-            num_keep = int(round(num_channels * (1.0 - target_sparsity)))
-            num_keep = max(1, num_keep)
-            if num_keep < num_channels:
-                sorted_indices = np.argsort(gamma)[::-1]  # descending
-                mask = np.zeros(num_channels, dtype=np.float32)
-                mask[sorted_indices[:num_keep]] = 1.0
-            else:
-                mask = np.ones(num_channels, dtype=np.float32)
+            k = per_layer_keep[name]
+            sorted_indices = np.argsort(gamma)[::-1]  # descending by |γ|
+            mask = np.zeros(num_channels, dtype=np.float32)
+            mask[sorted_indices[:k]] = 1.0
             masks[name] = mask
+            for ch in range(num_channels):
+                if mask[ch] == 1.0:
+                    kept_entries.append((gamma[ch], name, ch))
+                else:
+                    pruned_entries.append((gamma[ch], name, ch))
+
+        total_keep = sum(per_layer_keep.values())
+
+        # Step 3: Global correction — add or remove channels to hit desired_keep
+        if total_keep > desired_keep:
+            # Remove excess kept channels (lowest |γ| first), preserving ≥1 per layer
+            # Count how many are kept per layer for the min-1 guard
+            layer_kept_count = {name: int(masks[name].sum()) for name in layer_names}
+            # Sort kept entries ascending (weakest first)
+            kept_entries.sort(key=lambda x: x[0])
+            to_remove = total_keep - desired_keep
+            for val, name, ch in kept_entries:
+                if to_remove <= 0:
+                    break
+                if layer_kept_count[name] <= 1:
+                    continue  # preserve at least 1 per layer
+                masks[name][ch] = 0.0
+                layer_kept_count[name] -= 1
+                to_remove -= 1
+
+        elif total_keep < desired_keep:
+            # Add channels back (highest |γ| first among pruned)
+            pruned_entries.sort(key=lambda x: x[0], reverse=True)
+            to_add = desired_keep - total_keep
+            for val, name, ch in pruned_entries:
+                if to_add <= 0:
+                    break
+                masks[name][ch] = 1.0
+                to_add -= 1
+
         return masks
  
 
