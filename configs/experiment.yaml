@@ -21,11 +21,9 @@ models:
 # Pruning methods (baselines and proposed)
 pruning_methods:
   - imp  # Iterative Magnitude Pruning
-  - snip  # Single-shot Network Pruning
   - grasp  # Gradient Signal Preservation
   - synflow  # Synaptic Flow
   - early_bird  # Early-Bird Ticket
-  - fisher  # Fisher Information Pruning
   - genetic  # Genetic Algorithm Pruning
   - hybrid  # Hybrid OneShot-Iterative
   - adaptive_hybrid  # Proposed: Adaptive Hybrid with Dynamic Switching

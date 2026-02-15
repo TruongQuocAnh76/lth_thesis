@@ -183,6 +183,12 @@ def vgg16(num_classes=10, batch_norm=True):
     return VGG(cfg, num_classes=num_classes, batch_norm=batch_norm)
 
 
+def vgg19(num_classes=10, batch_norm=True):
+    """VGG-19 for CIFAR datasets with batch normalization."""
+    cfg = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512, 'M', 512, 512, 512, 512, 'M']
+    return VGG(cfg, num_classes=num_classes, batch_norm=batch_norm)
+
+
 # Model Factory Function
 def get_model(model_name, num_classes=10):
     """Factory function to get model by name.
@@ -205,8 +211,10 @@ def get_model(model_name, num_classes=10):
         return resnet50(num_classes=num_classes)
     elif model_name == 'vgg16':
         return vgg16(num_classes=num_classes)
+    elif model_name == 'vgg19':
+        return vgg19(num_classes=num_classes)
     else:
-        raise ValueError(f"Unknown model: {model_name}. Supported models: resnet20, resnet50, vgg16")
+        raise ValueError(f"Unknown model: {model_name}. Supported models: resnet20, resnet50, vgg16, vgg19")
 
 
 def count_parameters(model):
