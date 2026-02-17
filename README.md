@@ -67,10 +67,34 @@ python -m src.experiments --algorithm earlybird_resnet \
 - `--patience`: Convergence window size (default: 5)
 - `--pruning_method`: 'global' or 'layerwise' (default: 'global')
 
-### 3. Common Arguments
+### 3. GraSP (Gradient Signal Preservation)
+
+One-shot pruning at initialization that preserves gradient flow:
+
+```bash
+python -m src.experiments --algorithm grasp \
+    --model resnet20 \
+    --dataset cifar10 \
+    --seed 42 \
+    --target_sparsity 0.9 \
+    --epochs 160 \
+    --samples_per_class 10 \
+    --grasp_T 200.0
+```
+
+**Available GraSP arguments:**
+- `--target_sparsity`: Fraction of weights to prune (default: 0.9)
+- `--epochs`: Training epochs after pruning (default: 160)
+- `--samples_per_class`: Balanced samples per class for GraSP scoring (default: 10)
+- `--grasp_T`: Temperature scaling for logits (default: 200.0)
+- `--grasp_iters`: Gradient accumulation batches (default: 1)
+- `--lr_milestones`: Epochs at which to reduce LR (default: [80, 120])
+- `--lr_gamma`: LR decay factor (default: 0.1)
+
+### 4. Common Arguments
 
 All algorithms support:
-- `--model`: Model architecture (resnet20, resnet50, vgg16)
+- `--model`: Model architecture (resnet20, resnet50, vgg16, vgg19)
 - `--dataset`: Dataset (cifar10, cifar100, mnist)
 - `--seed`: Random seed (default: 42)
 - `--device`: cuda or cpu (default: cuda)
@@ -79,12 +103,13 @@ All algorithms support:
 - `--momentum`: SGD momentum (default: 0.9)
 - `--weight_decay`: Weight decay
 
-### 4. Quick Tests
+### 5. Quick Tests
 
 Run quick tests with reduced iterations (for validation):
 ```bash
 python -m src.experiments --mode quick_imp
 python -m src.experiments --mode quick_earlybird
+python -m src.experiments --mode quick_grasp
 ```
 
 ## Examples
@@ -105,6 +130,18 @@ python -m src.experiments --algorithm earlybird_resnet --model resnet20 --datase
 ```bash
 python -m src.experiments --algorithm earlybird --model vgg16 --dataset cifar100 \
     --target_sparsity 0.7 --search_epochs 160
+```
+
+**GraSP: One-shot pruning on ResNet20**
+```bash
+python -m src.experiments --algorithm grasp --model resnet20 --dataset cifar10 \
+    --target_sparsity 0.9 --epochs 160 --samples_per_class 10 --grasp_T 200
+```
+
+**GraSP: ResNet20 on CIFAR-100**
+```bash
+python -m src.experiments --algorithm grasp --model resnet20 --dataset cifar100 \
+    --target_sparsity 0.9 --epochs 160
 ```
 
 ## Output

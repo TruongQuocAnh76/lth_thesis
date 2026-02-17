@@ -51,6 +51,7 @@ from src.util import (
     create_mask_apply_fn,
     compute_mask_overlap,
 )
+from src.grasp import grasp, get_grasp_sparsity
 
 
 class IMPExperiment:
@@ -1019,6 +1020,337 @@ def run_quick_earlybird_test():
     return results
 
 
+class GraSPExperiment:
+    """GraSP (Gradient Signal Preservation) experiment runner.
+
+    GraSP is a one-shot pruning method applied at initialisation:
+    1. Initialise model (random init, NO training)
+    2. Compute GraSP importance scores from gradient flow
+    3. Prune to target sparsity in a single step
+    4. Train the sparse network from the (masked) initialisation
+    """
+
+    def __init__(
+        self,
+        model_name: str,
+        dataset_name: str,
+        num_classes: int,
+        target_sparsity: float,
+        epochs: int = 160,
+        batch_size: int = 128,
+        learning_rate: float = 0.1,
+        momentum: float = 0.9,
+        weight_decay: float = 1e-4,
+        lr_milestones: List[int] = [80, 120],
+        lr_gamma: float = 0.1,
+        samples_per_class: int = 10,
+        grasp_T: float = 200.0,
+        grasp_iters: int = 1,
+        seed: int = 42,
+        device: str = "cuda",
+        save_dir: str = "./results",
+    ):
+        """Initialise GraSP experiment.
+
+        Args:
+            model_name: Architecture name ('resnet20', 'vgg19', …)
+            dataset_name: Dataset name ('cifar10', 'cifar100')
+            num_classes: Number of output classes
+            target_sparsity: Fraction of weights to prune (e.g. 0.9)
+            epochs: Training epochs after pruning
+            batch_size: Training batch size
+            learning_rate: Initial learning rate
+            momentum: SGD momentum
+            weight_decay: L2 weight decay
+            lr_milestones: Epochs at which to multiply LR by lr_gamma
+            lr_gamma: LR decay factor
+            samples_per_class: Balanced samples per class for GraSP
+            grasp_T: Temperature scaling for GraSP logits
+            grasp_iters: Number of balanced batches for gradient accumulation
+            seed: Random seed
+            device: 'cuda' or 'cpu'
+            save_dir: Root directory for saved results
+        """
+        self.model_name = model_name
+        self.dataset_name = dataset_name
+        self.num_classes = num_classes
+        self.target_sparsity = target_sparsity
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.learning_rate = learning_rate
+        self.momentum = momentum
+        self.weight_decay = weight_decay
+        self.lr_milestones = list(lr_milestones)
+        self.lr_gamma = lr_gamma
+        self.samples_per_class = samples_per_class
+        self.grasp_T = grasp_T
+        self.grasp_iters = grasp_iters
+        self.seed = seed
+        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
+        self.save_dir = Path(save_dir)
+
+        self.results: Dict[str, Any] = {
+            'config': self._get_config_dict(),
+            'pruning': {},
+            'training': {},
+            'final_results': {},
+        }
+
+    def _get_config_dict(self) -> Dict:
+        return {
+            'algorithm': 'grasp',
+            'model_name': self.model_name,
+            'dataset_name': self.dataset_name,
+            'num_classes': self.num_classes,
+            'target_sparsity': self.target_sparsity,
+            'epochs': self.epochs,
+            'batch_size': self.batch_size,
+            'learning_rate': self.learning_rate,
+            'momentum': self.momentum,
+            'weight_decay': self.weight_decay,
+            'lr_milestones': self.lr_milestones,
+            'lr_gamma': self.lr_gamma,
+            'samples_per_class': self.samples_per_class,
+            'grasp_T': self.grasp_T,
+            'grasp_iters': self.grasp_iters,
+            'seed': self.seed,
+        }
+
+    def run(self) -> Dict[str, Any]:
+        """Run the complete GraSP experiment.
+
+        Returns:
+            Dictionary containing pruning info, training history, and
+            final accuracy / sparsity metrics.
+        """
+        from torch.optim.lr_scheduler import MultiStepLR as _MultiStepLR
+
+        print(f"\n{'='*60}")
+        print(f"Starting GraSP Experiment")
+        print(f"Model: {self.model_name}, Dataset: {self.dataset_name}")
+        print(f"Target Sparsity: {self.target_sparsity:.1%}")
+        print(f"Device: {self.device}")
+        print(f"{'='*60}\n")
+
+        # Seed
+        set_seed(self.seed)
+
+        # Data
+        loaders = get_dataloaders(
+            self.dataset_name, batch_size=self.batch_size, num_workers=4
+        )
+        train_loader = loaders['train']
+        test_loader = loaders['test']
+
+        # Model (Kaiming Normal init)
+        model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
+        for m in model.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+
+        param_info = count_parameters(model)
+        print(f"Model parameters: {param_info['total']:,}")
+
+        # ---- GraSP pruning (one-shot at init) ----
+        print(f"Running GraSP pruning (T={self.grasp_T}, "
+              f"samples={self.samples_per_class * self.num_classes}) …")
+        masks = grasp(
+            model, train_loader, self.device,
+            sparsity=self.target_sparsity,
+            num_classes=self.num_classes,
+            samples_per_class=self.samples_per_class,
+            num_iters=self.grasp_iters,
+            T=self.grasp_T,
+        )
+        layer_sp = get_grasp_sparsity(masks)
+        print(f"Achieved overall sparsity: {layer_sp['overall']*100:.2f}%")
+        for name, sp in layer_sp.items():
+            if name != 'overall':
+                print(f"  {name:>30s}: {sp*100:.2f}%")
+
+        self.results['pruning'] = {
+            'overall_sparsity': layer_sp['overall'],
+            'layer_sparsities': {k: v for k, v in layer_sp.items() if k != 'overall'},
+        }
+
+        # ---- Train ----
+        apply_fn = create_mask_apply_fn(model)
+        optimizer = optim.SGD(
+            model.parameters(),
+            lr=self.learning_rate,
+            momentum=self.momentum,
+            weight_decay=self.weight_decay,
+        )
+        scheduler = _MultiStepLR(optimizer, milestones=self.lr_milestones,
+                                 gamma=self.lr_gamma)
+        criterion = nn.CrossEntropyLoss()
+
+        print(f"Training for {self.epochs} epochs …")
+        history = train_epochs(
+            model=model,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            criterion=criterion,
+            optimizer=optimizer,
+            num_epochs=self.epochs,
+            device=self.device,
+            scheduler=scheduler,
+            masks=masks,
+            apply_mask_fn=apply_fn,
+            verbose=True,
+        )
+
+        best_test = max(history['test_accs']) if history['test_accs'] else 0.0
+        final_test = history['final_test_acc']
+
+        self.results['training'] = {
+            'train_losses': history['train_losses'],
+            'train_accs': history['train_accs'],
+            'test_losses': history['test_losses'],
+            'test_accs': history['test_accs'],
+        }
+        self.results['final_results'] = {
+            'best_test_accuracy': best_test,
+            'final_test_accuracy': final_test,
+            'overall_sparsity': layer_sp['overall'],
+        }
+
+        print(f"\n✓ Done — best test acc: {best_test:.2f}%, "
+              f"final test acc: {final_test:.2f}%")
+
+        # ---- Save ----
+        self._save_results(model, masks)
+
+        return self.results
+
+    # ------------------------------------------------------------------ #
+    # Persistence
+    # ------------------------------------------------------------------ #
+    def _save_results(self, model: nn.Module, masks: Dict):
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = (f"grasp_{self.model_name}_{self.dataset_name}"
+                f"_s{self.target_sparsity}_seed{self.seed}")
+        result_dir = self.save_dir / "grasp" / name / timestamp
+        result_dir.mkdir(parents=True, exist_ok=True)
+
+        # JSON
+        results_ser = _convert_to_serializable(self.results)
+        with open(result_dir / "results.json", 'w') as f:
+            json.dump(results_ser, f, indent=2)
+
+        # Summary CSV
+        self._save_summary_csv(result_dir / "summary.csv")
+
+        # Checkpoints
+        torch.save(model.state_dict(), result_dir / "final_model.pt")
+        masks_torch = {k: torch.from_numpy(v) for k, v in masks.items()}
+        torch.save(masks_torch, result_dir / "masks.pt")
+
+        print(f"Results saved to: {result_dir}")
+
+    def _save_summary_csv(self, path: Path):
+        import csv
+        with open(path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['epoch', 'train_loss', 'train_acc',
+                             'test_loss', 'test_acc'])
+            t = self.results['training']
+            for i in range(len(t.get('train_losses', []))):
+                writer.writerow([
+                    i + 1,
+                    f"{t['train_losses'][i]:.4f}",
+                    f"{t['train_accs'][i]:.2f}",
+                    f"{t['test_losses'][i]:.4f}" if i < len(t.get('test_losses', [])) else '',
+                    f"{t['test_accs'][i]:.2f}" if i < len(t.get('test_accs', [])) else '',
+                ])
+
+
+def run_grasp_experiment(
+    model_name: str = "resnet20",
+    dataset_name: str = "cifar10",
+    target_sparsity: float = 0.9,
+    epochs: int = 160,
+    samples_per_class: int = 10,
+    grasp_T: float = 200.0,
+    grasp_iters: int = 1,
+    learning_rate: float = 0.1,
+    lr_milestones: List[int] = [80, 120],
+    lr_gamma: float = 0.1,
+    seed: int = 42,
+    device: str = "cuda",
+    save_dir: str = "./results",
+) -> Dict[str, Any]:
+    """Convenience function to run a single GraSP experiment.
+
+    Args:
+        model_name: Model architecture ('resnet20', 'vgg19', …)
+        dataset_name: Dataset ('cifar10', 'cifar100')
+        target_sparsity: Fraction of weights to prune
+        epochs: Training epochs after pruning
+        samples_per_class: Balanced samples per class for GraSP
+        grasp_T: Temperature scaling for GraSP logits
+        grasp_iters: Gradient-accumulation batches for GraSP
+        learning_rate: Initial learning rate
+        lr_milestones: Epochs to decay LR
+        lr_gamma: LR decay factor
+        seed: Random seed
+        device: Compute device
+        save_dir: Results directory
+
+    Returns:
+        Experiment results dictionary.
+    """
+    num_classes = 10 if dataset_name.lower() == "cifar10" else 100
+
+    experiment = GraSPExperiment(
+        model_name=model_name,
+        dataset_name=dataset_name,
+        num_classes=num_classes,
+        target_sparsity=target_sparsity,
+        epochs=epochs,
+        samples_per_class=samples_per_class,
+        grasp_T=grasp_T,
+        grasp_iters=grasp_iters,
+        learning_rate=learning_rate,
+        lr_milestones=lr_milestones,
+        lr_gamma=lr_gamma,
+        seed=seed,
+        device=device,
+        save_dir=save_dir,
+    )
+    return experiment.run()
+
+
+def run_quick_grasp_test():
+    """Run a quick GraSP test with reduced parameters for debugging."""
+    print("Running quick GraSP test …")
+
+    results = run_grasp_experiment(
+        model_name="resnet20",
+        dataset_name="cifar10",
+        target_sparsity=0.5,
+        epochs=5,
+        samples_per_class=10,
+        grasp_T=200.0,
+        seed=42,
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        save_dir="./results",
+    )
+
+    print("\nQuick GraSP Test Results:")
+    print(f"Overall Sparsity: {results['final_results']['overall_sparsity']:.2%}")
+    print(f"Best Test Accuracy: {results['final_results']['best_test_accuracy']:.2f}%")
+    print(f"Final Test Accuracy: {results['final_results']['final_test_accuracy']:.2f}%")
+    return results
+
+
 def run_full_imp_study(config_path: str = "configs/experiment.yaml"):
     """Run the full IMP study across all configurations in the config file.
     
@@ -1415,8 +1747,45 @@ def run_experiment(
         print(f"\nResults saved to: {result_dir}")
         return results
     
+    elif algorithm.lower() == "grasp":
+        # GraSP parameters
+        target_sparsity = kwargs.get('target_sparsity', 0.9)
+        epochs = kwargs.get('epochs', 160)
+        batch_size = kwargs.get('batch_size', 128)
+        learning_rate = kwargs.get('learning_rate', 0.1)
+        momentum = kwargs.get('momentum', 0.9)
+        weight_decay = kwargs.get('weight_decay', 1e-4)
+        lr_milestones = kwargs.get('lr_milestones', [80, 120])
+        lr_gamma = kwargs.get('lr_gamma', 0.1)
+        samples_per_class = kwargs.get('samples_per_class', 10)
+        grasp_T = kwargs.get('grasp_T', 200.0)
+        grasp_iters = kwargs.get('grasp_iters', 1)
+
+        num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
+
+        experiment = GraSPExperiment(
+            model_name=model,
+            dataset_name=dataset,
+            num_classes=num_classes,
+            target_sparsity=target_sparsity,
+            epochs=epochs,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            momentum=momentum,
+            weight_decay=weight_decay,
+            lr_milestones=lr_milestones,
+            lr_gamma=lr_gamma,
+            samples_per_class=samples_per_class,
+            grasp_T=grasp_T,
+            grasp_iters=grasp_iters,
+            seed=seed,
+            device=device,
+        )
+        return experiment.run()
+
     else:
-        raise ValueError(f"Unknown algorithm: {algorithm}. Choose from: imp, earlybird, earlybird_resnet")
+        raise ValueError(f"Unknown algorithm: {algorithm}. "
+                         f"Choose from: imp, earlybird, earlybird_resnet, grasp")
 
 
 if __name__ == "__main__":
@@ -1439,15 +1808,24 @@ Examples:
   python -m src.experiments --algorithm earlybird_resnet --model resnet20 --dataset cifar10 --seed 42 \\
       --target_sparsity 0.5 --total_epochs 160 --l1_coef 1e-4
 
+  # Run GraSP on ResNet20 with CIFAR-10
+  python -m src.experiments --algorithm grasp --model resnet20 --dataset cifar10 --seed 42 \\
+      --target_sparsity 0.9 --epochs 160 --samples_per_class 10 --grasp_T 200
+
+  # Run GraSP on ResNet20 with CIFAR-100
+  python -m src.experiments --algorithm grasp --model resnet20 --dataset cifar100 --seed 42 \\
+      --target_sparsity 0.9 --epochs 160 --samples_per_class 10 --grasp_T 200
+
   # Quick test modes
   python -m src.experiments --mode quick_imp
   python -m src.experiments --mode quick_earlybird
+  python -m src.experiments --mode quick_grasp
         """
     )
     
     # Main arguments
     parser.add_argument("--algorithm", type=str, default="imp",
-                       choices=["imp", "earlybird", "earlybird_resnet"],
+                       choices=["imp", "earlybird", "earlybird_resnet", "grasp"],
                        help="Pruning algorithm to use")
     parser.add_argument("--model", type=str, default="resnet20",
                        help="Model architecture (resnet20, vgg16, etc.)")
@@ -1460,7 +1838,7 @@ Examples:
     
     # Special modes
     parser.add_argument("--mode", type=str, default=None,
-                       choices=["quick_imp", "quick_earlybird", "full"],
+                       choices=["quick_imp", "quick_earlybird", "quick_grasp", "full"],
                        help="Quick test or full experiment mode")
     
     # IMP-specific arguments
@@ -1494,6 +1872,17 @@ Examples:
                          choices=["global", "layerwise"],
                          help="Pruning method (Early-Bird)")
     
+    # GraSP-specific arguments
+    grasp_group = parser.add_argument_group('GraSP arguments')
+    grasp_group.add_argument("--samples_per_class", type=int, default=10,
+                            help="Balanced samples per class for GraSP scoring batch")
+    grasp_group.add_argument("--grasp_T", type=float, default=200.0,
+                            help="Temperature scaling for GraSP logits")
+    grasp_group.add_argument("--grasp_iters", type=int, default=1,
+                            help="Number of balanced batches for GraSP gradient accumulation")
+    grasp_group.add_argument("--epochs", type=int, default=160,
+                            help="Training epochs after GraSP pruning")
+
     # Common training arguments
     train_group = parser.add_argument_group('Training arguments')
     train_group.add_argument("--batch_size", type=int, default=None,
@@ -1516,6 +1905,8 @@ Examples:
         run_quick_imp_test()
     elif args.mode == "quick_earlybird":
         run_quick_earlybird_test()
+    elif args.mode == "quick_grasp":
+        run_quick_grasp_test()
     elif args.mode == "full":
         run_full_imp_study()
     else:
@@ -1553,7 +1944,18 @@ Examples:
             kwargs['pruning_method'] = args.pruning_method
             kwargs['batch_size'] = args.batch_size if args.batch_size else 128
             kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 1e-4
-        
+
+        elif args.algorithm == "grasp":
+            kwargs['target_sparsity'] = args.target_sparsity
+            kwargs['epochs'] = args.epochs
+            kwargs['lr_milestones'] = args.lr_milestones
+            kwargs['lr_gamma'] = args.lr_gamma
+            kwargs['samples_per_class'] = args.samples_per_class
+            kwargs['grasp_T'] = args.grasp_T
+            kwargs['grasp_iters'] = args.grasp_iters
+            kwargs['batch_size'] = args.batch_size if args.batch_size else 128
+            kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 1e-4
+
         # Common arguments
         kwargs['learning_rate'] = args.learning_rate
         kwargs['momentum'] = args.momentum
@@ -1578,4 +1980,9 @@ Examples:
                 print(f"Actual sparsity: {results['actual_sparsity']:.2f}%")
             else:
                 print("Did not converge within epoch limit")
+        elif args.algorithm == "grasp":
+            fr = results.get('final_results', {})
+            print(f"Overall Sparsity: {fr.get('overall_sparsity', 0):.2%}")
+            print(f"Best Test Accuracy: {fr.get('best_test_accuracy', 0):.2f}%")
+            print(f"Final Test Accuracy: {fr.get('final_test_accuracy', 0):.2f}%")
         print(f"{'='*80}\n")
