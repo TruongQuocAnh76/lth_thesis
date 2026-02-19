@@ -110,6 +110,7 @@ Run quick tests with reduced iterations (for validation):
 python -m src.experiments --mode quick_imp
 python -m src.experiments --mode quick_earlybird
 python -m src.experiments --mode quick_grasp
+python -m src.experiments --mode quick_synflow
 ```
 
 ## Examples
@@ -144,21 +145,78 @@ python -m src.experiments --algorithm grasp --model resnet20 --dataset cifar100 
     --target_sparsity 0.9 --epochs 160
 ```
 
+**SynFlow: Iterative data-free pruning on ResNet20**
+```bash
+python -m src.experiments --algorithm synflow --model resnet20 --dataset cifar10 \
+    --target_sparsity 0.9 --epochs 160 --synflow_iters 100
+```
+
+**SynFlow: ResNet20 on CIFAR-100 at 60% sparsity**
+```bash
+python -m src.experiments --algorithm synflow --model resnet20 --dataset cifar100 \
+    --target_sparsity 0.6 --epochs 160 --synflow_iters 100
+```
+
+### 4. SynFlow (Synaptic Flow)
+
+Data-free iterative pruning at initialization with exponential schedule:
+
+```bash
+python -m src.experiments --algorithm synflow \
+    --model resnet20 \
+    --dataset cifar10 \
+    --seed 42 \
+    --target_sparsity 0.9 \
+    --epochs 160 \
+    --synflow_iters 100
+```
+
+**Available SynFlow arguments:**
+- `--target_sparsity`: Fraction of weights to prune (default: 0.9)
+- `--synflow_iters`: Number of iterative SynFlow pruning rounds (default: 100)
+- `--epochs`: Training epochs after pruning (default: 160)
+- `--lr_milestones`: Epochs at which to reduce LR (default: [80, 120])
+- `--lr_gamma`: LR decay factor (default: 0.1)
+
+### 5. Common Arguments
+
+All algorithms support:
+- `--model`: Model architecture (resnet20, resnet50, vgg16, vgg19)
+- `--dataset`: Dataset (cifar10, cifar100, mnist)
+- `--seed`: Random seed (default: 42)
+- `--device`: cuda or cpu (default: cuda)
+- `--batch_size`: Training batch size
+- `--learning_rate`: Initial learning rate (default: 0.1)
+- `--momentum`: SGD momentum (default: 0.9)
+- `--weight_decay`: Weight decay
+
+### 6. Quick Tests
+
+Run quick tests with reduced iterations (for validation):
+```bash
+python -m src.experiments --mode quick_imp
+python -m src.experiments --mode quick_earlybird
+python -m src.experiments --mode quick_grasp
+python -m src.experiments --mode quick_synflow
+```
+
 ## Output
 
 Results are saved to `./results/` with timestamps:
 ```
 results/
-├── earlybird_resnet_cifar10_resnet20_s0.50_20260204_120530.json
-├── imp_cifar10_resnet20_s0.90_20260204_121045.json
+├── earlybird_resnet/
+├── grasp/
+├── imp/
+├── synflow/
 └── ...
 ```
 
-Each result file contains:
-- Algorithm configuration
-- Convergence information (Early-Bird)
-- Training history
-- Final accuracies and sparsity metrics
+Each result directory contains:
+- `results.json`: Algorithm configuration, training history, final accuracies and sparsity metrics
+- `summary.csv`: Epoch-by-epoch training/test metrics
+- `final_model.pt`: Trained model state dict
+- `masks.pt` or `final_masks.pt`: Pruning masks
 
 # Kế hoạch
 
