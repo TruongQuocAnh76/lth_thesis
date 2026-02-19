@@ -129,7 +129,7 @@ def compute_synflow_scores(
 def synflow_pruning(
     model: nn.Module,
     device: torch.device,
-    target_sparsity: float,
+    rho: float,
     num_iters: int = 100,
     input_shape: Tuple[int, ...] = (3, 32, 32),
 ) -> Dict[str, np.ndarray]:
@@ -153,7 +153,9 @@ def synflow_pruning(
         model: Model at initialisation (weights will **not** be modified;
                a deep copy is used internally).
         device: Torch device.
-        target_sparsity: Fraction of weights to prune (e.g. 0.9 → keep 10%).
+        rho: Compression ratio ρ ≥ 1.  ρ = 1 means no pruning (keep all),
+             ρ = 10 means keep 1/10 of the weights (90 % sparsity).
+             Equivalently: keep_ratio = 1 / ρ,  sparsity = 1 − 1/ρ.
         num_iters: Number of iterative pruning rounds (default 100).
         input_shape: Spatial input shape without batch dim.
 
@@ -171,8 +173,11 @@ def synflow_pruning(
             masks[name] = torch.ones_like(module.weight.data)
 
     # Compression ratio ρ  (fraction of weights to *keep*)
-    # target_sparsity = 0.9 → keep_ratio = 0.1
-    keep_ratio = 1.0 - target_sparsity
+    # ρ = 10 → keep_ratio = 1/10 = 0.1  (90 % sparsity)
+    # ρ = 1  → keep_ratio = 1.0          (no pruning)
+    if rho < 1.0:
+        raise ValueError(f"rho must be >= 1, got {rho}")
+    keep_ratio = 1.0 / rho
     if keep_ratio <= 0:
         # Edge case: prune everything
         return {k: np.zeros_like(v.numpy()) for k, v in masks.items()}

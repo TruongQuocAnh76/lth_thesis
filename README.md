@@ -148,13 +148,13 @@ python -m src.experiments --algorithm grasp --model resnet20 --dataset cifar100 
 **SynFlow: Iterative data-free pruning on ResNet20**
 ```bash
 python -m src.experiments --algorithm synflow --model resnet20 --dataset cifar10 \
-    --target_sparsity 0.9 --epochs 160 --synflow_iters 100
+    --rho 10 --epochs 160 --synflow_iters 100
 ```
 
-**SynFlow: ResNet20 on CIFAR-100 at 60% sparsity**
+**SynFlow: ResNet20 on CIFAR-100 at ρ=2.5 (60% sparsity)**
 ```bash
 python -m src.experiments --algorithm synflow --model resnet20 --dataset cifar100 \
-    --target_sparsity 0.6 --epochs 160 --synflow_iters 100
+    --rho 2.5 --epochs 160 --synflow_iters 100
 ```
 
 ### 4. SynFlow (Synaptic Flow)
@@ -166,13 +166,13 @@ python -m src.experiments --algorithm synflow \
     --model resnet20 \
     --dataset cifar10 \
     --seed 42 \
-    --target_sparsity 0.9 \
+    --rho 10 \
     --epochs 160 \
     --synflow_iters 100
 ```
 
 **Available SynFlow arguments:**
-- `--target_sparsity`: Fraction of weights to prune (default: 0.9)
+- `--rho`: Compression ratio ρ ≥ 1 (default: 10). ρ=1 no pruning, ρ=10 keep 10%, ρ=100 keep 1%
 - `--synflow_iters`: Number of iterative SynFlow pruning rounds (default: 100)
 - `--epochs`: Training epochs after pruning (default: 160)
 - `--lr_milestones`: Epochs at which to reduce LR (default: [80, 120])

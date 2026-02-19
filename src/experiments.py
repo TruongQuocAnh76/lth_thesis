@@ -1373,7 +1373,7 @@ class SynFlowExperiment:
         model_name: str,
         dataset_name: str,
         num_classes: int,
-        target_sparsity: float,
+        rho: float,
         synflow_iters: int = 100,
         epochs: int = 160,
         batch_size: int = 128,
@@ -1392,7 +1392,8 @@ class SynFlowExperiment:
             model_name: Architecture name ('resnet20', 'vgg16', …)
             dataset_name: Dataset name ('cifar10', 'cifar100')
             num_classes: Number of output classes
-            target_sparsity: Fraction of weights to prune (e.g. 0.9)
+            rho: Compression ratio ρ ≥ 1.  ρ = 1 means no pruning,
+                 ρ = 10 means keep 1/10 of weights (90 % sparsity).
             synflow_iters: Number of iterative SynFlow pruning rounds
             epochs: Training epochs after pruning
             batch_size: Training batch size
@@ -1408,7 +1409,7 @@ class SynFlowExperiment:
         self.model_name = model_name
         self.dataset_name = dataset_name
         self.num_classes = num_classes
-        self.target_sparsity = target_sparsity
+        self.rho = rho
         self.synflow_iters = synflow_iters
         self.epochs = epochs
         self.batch_size = batch_size
@@ -1434,7 +1435,7 @@ class SynFlowExperiment:
             'model_name': self.model_name,
             'dataset_name': self.dataset_name,
             'num_classes': self.num_classes,
-            'target_sparsity': self.target_sparsity,
+            'rho': self.rho,
             'synflow_iters': self.synflow_iters,
             'epochs': self.epochs,
             'batch_size': self.batch_size,
@@ -1459,7 +1460,7 @@ class SynFlowExperiment:
         print(f"\n{'='*60}")
         print(f"Starting SynFlow Experiment")
         print(f"Model: {self.model_name}, Dataset: {self.dataset_name}")
-        print(f"Target Sparsity: {self.target_sparsity:.1%}")
+        print(f"Compression ratio ρ: {self.rho:.1f}  (sparsity {1 - 1/self.rho:.1%})")
         print(f"SynFlow iterations: {self.synflow_iters}")
         print(f"Device: {self.device}")
         print(f"{'='*60}\n")
@@ -1502,7 +1503,7 @@ class SynFlowExperiment:
         masks = synflow_pruning(
             model,
             device=self.device,
-            target_sparsity=self.target_sparsity,
+            rho=self.rho,
             num_iters=self.synflow_iters,
             input_shape=input_shape,
         )
@@ -1571,6 +1572,7 @@ class SynFlowExperiment:
         self.results['final_results'] = {
             'best_test_accuracy': best_test,
             'final_test_accuracy': final_test,
+            'rho': self.rho,
             'overall_sparsity': layer_sp['overall'],
             'pruning_time_seconds': prune_time,
             'training_time_seconds': train_time,
@@ -1594,7 +1596,7 @@ class SynFlowExperiment:
     def _save_results(self, model: nn.Module, masks: Dict):
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         name = (f"synflow_{self.model_name}_{self.dataset_name}"
-                f"_s{self.target_sparsity}_seed{self.seed}")
+                f"_rho{self.rho}_seed{self.seed}")
         result_dir = self.save_dir / "synflow" / name / timestamp
         result_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1633,7 +1635,7 @@ class SynFlowExperiment:
 def run_synflow_experiment(
     model_name: str = "resnet20",
     dataset_name: str = "cifar10",
-    target_sparsity: float = 0.9,
+    rho: float = 10.0,
     synflow_iters: int = 100,
     epochs: int = 160,
     learning_rate: float = 0.1,
@@ -1648,7 +1650,7 @@ def run_synflow_experiment(
     Args:
         model_name: Model architecture ('resnet20', 'vgg16', …)
         dataset_name: Dataset ('cifar10', 'cifar100')
-        target_sparsity: Fraction of weights to prune
+        rho: Compression ratio ρ ≥ 1 (e.g. 10 = keep 10 % of weights)
         synflow_iters: Number of iterative SynFlow pruning rounds
         epochs: Training epochs after pruning
         learning_rate: Initial learning rate
@@ -1667,7 +1669,7 @@ def run_synflow_experiment(
         model_name=model_name,
         dataset_name=dataset_name,
         num_classes=num_classes,
-        target_sparsity=target_sparsity,
+        rho=rho,
         synflow_iters=synflow_iters,
         epochs=epochs,
         learning_rate=learning_rate,
@@ -1687,7 +1689,7 @@ def run_quick_synflow_test():
     results = run_synflow_experiment(
         model_name="resnet20",
         dataset_name="cifar10",
-        target_sparsity=0.5,
+        rho=2.0,
         synflow_iters=10,
         epochs=5,
         seed=42,
@@ -2138,7 +2140,7 @@ def run_experiment(
 
     elif algorithm.lower() == "synflow":
         # SynFlow parameters
-        target_sparsity = kwargs.get('target_sparsity', 0.9)
+        rho = kwargs.get('rho', 10.0)
         synflow_iters = kwargs.get('synflow_iters', 100)
         epochs = kwargs.get('epochs', 160)
         batch_size = kwargs.get('batch_size', 128)
@@ -2154,7 +2156,7 @@ def run_experiment(
             model_name=model,
             dataset_name=dataset,
             num_classes=num_classes,
-            target_sparsity=target_sparsity,
+            rho=rho,
             synflow_iters=synflow_iters,
             epochs=epochs,
             batch_size=batch_size,
@@ -2203,11 +2205,11 @@ Examples:
 
   # Run SynFlow on ResNet20 with CIFAR-10
   python -m src.experiments --algorithm synflow --model resnet20 --dataset cifar10 --seed 42 \\
-      --target_sparsity 0.9 --epochs 160 --synflow_iters 100
+      --rho 10 --epochs 160 --synflow_iters 100
 
   # Run SynFlow on ResNet20 with CIFAR-100
   python -m src.experiments --algorithm synflow --model resnet20 --dataset cifar100 --seed 42 \\
-      --target_sparsity 0.9 --epochs 160 --synflow_iters 100
+      --rho 10 --epochs 160 --synflow_iters 100
 
   # Quick test modes
   python -m src.experiments --mode quick_imp
@@ -2279,6 +2281,9 @@ Examples:
 
     # SynFlow-specific arguments
     synflow_group = parser.add_argument_group('SynFlow arguments')
+    synflow_group.add_argument("--rho", type=float, default=10.0,
+                              help="Compression ratio ρ ≥ 1 (default: 10 = 90%% sparsity). "
+                                   "ρ=1 no pruning, ρ=10 keep 10%%, ρ=100 keep 1%%")
     synflow_group.add_argument("--synflow_iters", type=int, default=100,
                               help="Number of iterative SynFlow pruning rounds (default: 100)")
 
@@ -2358,7 +2363,7 @@ Examples:
             kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 1e-4
 
         elif args.algorithm == "synflow":
-            kwargs['target_sparsity'] = args.target_sparsity
+            kwargs['rho'] = args.rho
             kwargs['synflow_iters'] = args.synflow_iters
             kwargs['epochs'] = args.epochs
             kwargs['lr_milestones'] = args.lr_milestones
@@ -2397,6 +2402,7 @@ Examples:
             print(f"Final Test Accuracy: {fr.get('final_test_accuracy', 0):.2f}%")
         elif args.algorithm == "synflow":
             fr = results.get('final_results', {})
+            print(f"Compression Ratio ρ: {fr.get('rho', 0):.1f}")
             print(f"Overall Sparsity: {fr.get('overall_sparsity', 0):.2%}")
             print(f"Best Test Accuracy: {fr.get('best_test_accuracy', 0):.2f}%")
             print(f"Final Test Accuracy: {fr.get('final_test_accuracy', 0):.2f}%")
