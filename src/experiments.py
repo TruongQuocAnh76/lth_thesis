@@ -53,6 +53,7 @@ from src.util import (
 )
 from src.grasp import grasp, get_grasp_sparsity
 from src.synflow import synflow_pruning, apply_synflow_masks, get_synflow_sparsity
+from src.ga import GAConfig, GeneticAlgorithmPruner
 
 
 class IMPExperiment:
@@ -1353,6 +1354,414 @@ def run_quick_grasp_test():
 
 
 # ====================================================================
+# Genetic Algorithm Experiment
+# ====================================================================
+
+class GAExperiment:
+    """Genetic Algorithm experiment for finding Lottery Tickets.
+
+    Evolves binary masks over a fixed, randomly-initialised network.
+    After the GA discovers the best mask, the sub-network is trained
+    from scratch (or from the original initialisation) using standard
+    SGD, following the same post-pruning training protocol as IMP /
+    SynFlow.
+
+    Pipeline:
+    1.  Initialise model (random init, NO training).
+    2.  Run GA on the mask space to maximise sub-network quality.
+    3.  (Optional) Post-evolutionary pruning for extra sparsity.
+    4.  Train the discovered sub-network from the masked init.
+    """
+
+    def __init__(
+        self,
+        model_name: str,
+        dataset_name: str,
+        num_classes: int,
+        # GA hyper-parameters
+        population_size: int = 100,
+        rec_rate: float = 0.3,
+        mut_rate: float = 0.1,
+        mig_rate: float = 0.1,
+        par_rate: float = 0.3,
+        min_generations: int = 100,
+        max_generations: int = 200,
+        stagnation_threshold: int = 50,
+        use_adaptive_ab: bool = False,
+        initial_ab_threshold: float = 0.7,
+        ab_decay_rate: float = 0.95,
+        use_loss_fitness: bool = True,
+        max_eval_batches: Optional[int] = None,
+        post_prune: bool = True,
+        # Training hyper-parameters (applied after GA)
+        epochs: int = 160,
+        batch_size: int = 128,
+        learning_rate: float = 0.1,
+        momentum: float = 0.9,
+        weight_decay: float = 1e-4,
+        lr_milestones: List[int] = [80, 120],
+        lr_gamma: float = 0.1,
+        seed: int = 42,
+        device: str = "cuda",
+        save_dir: str = "./results",
+    ):
+        self.model_name = model_name
+        self.dataset_name = dataset_name
+        self.num_classes = num_classes
+
+        # GA config
+        self.ga_cfg = GAConfig(
+            population_size=population_size,
+            rec_rate=rec_rate,
+            mut_rate=mut_rate,
+            mig_rate=mig_rate,
+            par_rate=par_rate,
+            min_generations=min_generations,
+            max_generations=max_generations,
+            stagnation_threshold=stagnation_threshold,
+            use_adaptive_ab=use_adaptive_ab,
+            initial_ab_threshold=initial_ab_threshold,
+            ab_decay_rate=ab_decay_rate,
+            use_loss_fitness=use_loss_fitness,
+            max_eval_batches=max_eval_batches,
+            post_prune=post_prune,
+        )
+
+        # Training config
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.learning_rate = learning_rate
+        self.momentum = momentum
+        self.weight_decay = weight_decay
+        self.lr_milestones = list(lr_milestones)
+        self.lr_gamma = lr_gamma
+        self.seed = seed
+        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
+        self.save_dir = Path(save_dir)
+
+        self.results: Dict[str, Any] = {
+            'config': self._get_config_dict(),
+            'ga': {},
+            'training': {},
+            'final_results': {},
+        }
+
+    def _get_config_dict(self) -> Dict:
+        return {
+            'algorithm': 'genetic',
+            'model_name': self.model_name,
+            'dataset_name': self.dataset_name,
+            'num_classes': self.num_classes,
+            'population_size': self.ga_cfg.population_size,
+            'rec_rate': self.ga_cfg.rec_rate,
+            'mut_rate': self.ga_cfg.mut_rate,
+            'mig_rate': self.ga_cfg.mig_rate,
+            'par_rate': self.ga_cfg.par_rate,
+            'min_generations': self.ga_cfg.min_generations,
+            'max_generations': self.ga_cfg.max_generations,
+            'stagnation_threshold': self.ga_cfg.stagnation_threshold,
+            'use_adaptive_ab': self.ga_cfg.use_adaptive_ab,
+            'use_loss_fitness': self.ga_cfg.use_loss_fitness,
+            'post_prune': self.ga_cfg.post_prune,
+            'epochs': self.epochs,
+            'batch_size': self.batch_size,
+            'learning_rate': self.learning_rate,
+            'momentum': self.momentum,
+            'weight_decay': self.weight_decay,
+            'lr_milestones': self.lr_milestones,
+            'lr_gamma': self.lr_gamma,
+            'seed': self.seed,
+        }
+
+    def run(self) -> Dict[str, Any]:
+        """Run the full GA→train pipeline.
+
+        Returns:
+            Dictionary with GA stats, training history, and final metrics.
+        """
+        import time as _time
+        from torch.optim.lr_scheduler import MultiStepLR as _MultiStepLR
+
+        print(f"\n{'='*60}")
+        print(f"Starting GA Experiment")
+        print(f"Model: {self.model_name}, Dataset: {self.dataset_name}")
+        print(f"Population: {self.ga_cfg.population_size}, "
+              f"Generations: {self.ga_cfg.min_generations}–{self.ga_cfg.max_generations}")
+        print(f"Device: {self.device}")
+        print(f"{'='*60}\n")
+
+        total_start = _time.time()
+
+        # Seed
+        set_seed(self.seed)
+
+        # Data
+        loaders = get_dataloaders(
+            self.dataset_name, batch_size=self.batch_size, num_workers=4
+        )
+        train_loader = loaders['train']
+        test_loader = loaders['test']
+
+        # Model (Kaiming init — same as other experiments)
+        model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
+        for m in model.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+
+        param_info = count_parameters(model)
+        print(f"Model parameters: {param_info['total']:,}")
+
+        # Save initial weights for resetting after GA
+        initial_state = copy.deepcopy(model.state_dict())
+
+        # ---- GA mask search ---- #
+        print(f"\nRunning Genetic Algorithm mask search …")
+        ga_start = _time.time()
+
+        pruner = GeneticAlgorithmPruner(
+            model=model,
+            train_loader=train_loader,
+            device=self.device,
+            config=self.ga_cfg,
+            verbose=True,
+        )
+        masks, ga_stats = pruner.run()
+        ga_time = _time.time() - ga_start
+
+        # Compute sparsity from the discovered masks
+        total_params = sum(m.size for m in masks.values())
+        total_zeros = sum((m == 0).sum() for m in masks.values())
+        overall_sparsity = total_zeros / total_params if total_params > 0 else 0.0
+        layer_sparsities = {}
+        for name, m in masks.items():
+            layer_sparsities[name] = float(1.0 - m.mean())
+
+        print(f"GA completed — overall sparsity: {overall_sparsity:.2%}")
+        for name, sp in layer_sparsities.items():
+            print(f"  {name:>30s}: {sp*100:.2f}%")
+
+        self.results['ga'] = {
+            'total_generations': ga_stats['total_generations'],
+            'evolve_time_seconds': ga_stats['evolve_time_seconds'],
+            'total_ga_time_seconds': ga_time,
+            'best_performance': ga_stats['best_performance'],
+            'best_sparsity': ga_stats['best_sparsity'],
+            'cache_entries': ga_stats['cache_entries'],
+            'overall_sparsity': overall_sparsity,
+            'layer_sparsities': layer_sparsities,
+            'generation_history': ga_stats['generations'],
+            'ga_config': ga_stats['config'],
+        }
+
+        # ---- Reset model to initial weights & apply mask ---- #
+        model.load_state_dict(initial_state)
+        apply_masks_to_model(model, masks)
+
+        # ---- Train the discovered sub-network ---- #
+        apply_fn = create_mask_apply_fn(model)
+        optimizer = optim.SGD(
+            model.parameters(),
+            lr=self.learning_rate,
+            momentum=self.momentum,
+            weight_decay=self.weight_decay,
+        )
+        scheduler = _MultiStepLR(optimizer, milestones=self.lr_milestones,
+                                 gamma=self.lr_gamma)
+        criterion = nn.CrossEntropyLoss()
+
+        print(f"\nTraining discovered sub-network for {self.epochs} epochs …")
+        train_start = _time.time()
+
+        history = train_epochs(
+            model=model,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            criterion=criterion,
+            optimizer=optimizer,
+            num_epochs=self.epochs,
+            device=self.device,
+            scheduler=scheduler,
+            masks=masks,
+            apply_mask_fn=apply_fn,
+            verbose=True,
+        )
+
+        train_time = _time.time() - train_start
+        total_time = _time.time() - total_start
+
+        best_test = max(history['test_accs']) if history['test_accs'] else 0.0
+        final_test = history['final_test_acc']
+
+        self.results['training'] = {
+            'train_losses': history['train_losses'],
+            'train_accs': history['train_accs'],
+            'test_losses': history['test_losses'],
+            'test_accs': history['test_accs'],
+            'training_time_seconds': train_time,
+        }
+        self.results['final_results'] = {
+            'best_test_accuracy': best_test,
+            'final_test_accuracy': final_test,
+            'overall_sparsity': overall_sparsity,
+            'ga_time_seconds': ga_time,
+            'training_time_seconds': train_time,
+            'total_time_seconds': total_time,
+            'total_generations': ga_stats['total_generations'],
+        }
+
+        print(f"\n✓ Done — best test acc: {best_test:.2f}%, "
+              f"final test acc: {final_test:.2f}%")
+        print(f"  GA time      : {ga_time:.2f}s")
+        print(f"  Training time: {train_time:.2f}s")
+        print(f"  Total time   : {total_time:.2f}s")
+        print(f"  Sparsity     : {overall_sparsity:.2%}")
+
+        # ---- Save ---- #
+        self._save_results(model, masks)
+
+        return self.results
+
+    # ------------------------------------------------------------------ #
+    # Persistence
+    # ------------------------------------------------------------------ #
+    def _save_results(self, model: nn.Module, masks: Dict):
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = (f"ga_{self.model_name}_{self.dataset_name}"
+                f"_pop{self.ga_cfg.population_size}_seed{self.seed}")
+        result_dir = self.save_dir / "genetic" / name / timestamp
+        result_dir.mkdir(parents=True, exist_ok=True)
+
+        # JSON
+        results_ser = _convert_to_serializable(self.results)
+        with open(result_dir / "results.json", 'w') as f:
+            json.dump(results_ser, f, indent=2)
+
+        # Summary CSV
+        self._save_summary_csv(result_dir / "summary.csv")
+
+        # GA generation history CSV
+        self._save_ga_history_csv(result_dir / "ga_history.csv")
+
+        # Checkpoints
+        torch.save(model.state_dict(), result_dir / "final_model.pt")
+        masks_torch = {k: torch.from_numpy(v) for k, v in masks.items()}
+        torch.save(masks_torch, result_dir / "masks.pt")
+
+        print(f"Results saved to: {result_dir}")
+
+    def _save_summary_csv(self, path: Path):
+        import csv
+        with open(path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['epoch', 'train_loss', 'train_acc',
+                             'test_loss', 'test_acc'])
+            t = self.results['training']
+            for i in range(len(t.get('train_losses', []))):
+                writer.writerow([
+                    i + 1,
+                    f"{t['train_losses'][i]:.4f}",
+                    f"{t['train_accs'][i]:.2f}",
+                    f"{t['test_losses'][i]:.4f}" if i < len(t.get('test_losses', [])) else '',
+                    f"{t['test_accs'][i]:.2f}" if i < len(t.get('test_accs', [])) else '',
+                ])
+
+    def _save_ga_history_csv(self, path: Path):
+        import csv
+        gens = self.results.get('ga', {}).get('generation_history', [])
+        if not gens:
+            return
+        with open(path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                'generation', 'best_perf', 'best_sparsity',
+                'mean_perf', 'std_perf', 'mean_sparsity',
+                'pop_before_select', 'cache_size', 'cache_hit_rate',
+            ])
+            for g in gens:
+                writer.writerow([
+                    g['generation'],
+                    f"{g['best_perf']:.6f}",
+                    f"{g['best_sparsity']:.6f}",
+                    f"{g['mean_perf']:.6f}",
+                    f"{g['std_perf']:.6f}",
+                    f"{g['mean_sparsity']:.6f}",
+                    g['pop_size_before_select'],
+                    g['cache_size'],
+                    f"{g['cache_hit_rate']:.4f}",
+                ])
+
+
+def run_ga_experiment(
+    model_name: str = "resnet20",
+    dataset_name: str = "cifar10",
+    population_size: int = 100,
+    min_generations: int = 100,
+    max_generations: int = 200,
+    stagnation_threshold: int = 50,
+    use_loss_fitness: bool = True,
+    max_eval_batches: Optional[int] = None,
+    post_prune: bool = True,
+    epochs: int = 160,
+    learning_rate: float = 0.1,
+    lr_milestones: List[int] = [80, 120],
+    lr_gamma: float = 0.1,
+    seed: int = 42,
+    device: str = "cuda",
+    save_dir: str = "./results",
+) -> Dict[str, Any]:
+    """Convenience function to run a single GA experiment.
+
+    Args:
+        model_name:  Model architecture ('resnet20', 'vgg16', …)
+        dataset_name: Dataset ('cifar10', 'cifar100')
+        population_size: GA population size
+        min_generations: Minimum number of GA generations
+        max_generations: Maximum number of GA generations
+        stagnation_threshold: Stop after this many generations without improvement
+        use_loss_fitness: If True, use negative loss as fitness; else accuracy
+        max_eval_batches: Limit evaluation batches per individual (None=all)
+        post_prune: Apply post-evolutionary pruning
+        epochs: Training epochs after GA
+        learning_rate: Initial learning rate
+        lr_milestones: Epochs to decay LR
+        lr_gamma: LR decay factor
+        seed: Random seed
+        device: Compute device
+        save_dir: Results directory
+
+    Returns:
+        Experiment results dictionary.
+    """
+    num_classes = 10 if dataset_name.lower() == "cifar10" else 100
+
+    experiment = GAExperiment(
+        model_name=model_name,
+        dataset_name=dataset_name,
+        num_classes=num_classes,
+        population_size=population_size,
+        min_generations=min_generations,
+        max_generations=max_generations,
+        stagnation_threshold=stagnation_threshold,
+        use_loss_fitness=use_loss_fitness,
+        max_eval_batches=max_eval_batches,
+        post_prune=post_prune,
+        epochs=epochs,
+        learning_rate=learning_rate,
+        lr_milestones=lr_milestones,
+        lr_gamma=lr_gamma,
+        seed=seed,
+        device=device,
+        save_dir=save_dir,
+    )
+    return experiment.run()
+# ====================================================================
 # SynFlow Experiment
 # ====================================================================
 
@@ -2170,9 +2579,65 @@ def run_experiment(
         )
         return experiment.run()
 
+    elif algorithm.lower() == "genetic":
+        # GA parameters
+        population_size = kwargs.get('population_size', 100)
+        rec_rate = kwargs.get('rec_rate', 0.3)
+        mut_rate = kwargs.get('mut_rate', 0.1)
+        mig_rate = kwargs.get('mig_rate', 0.1)
+        par_rate = kwargs.get('par_rate', 0.3)
+        min_generations = kwargs.get('min_generations', 100)
+        max_generations = kwargs.get('max_generations', 200)
+        stagnation_threshold = kwargs.get('stagnation_threshold', 50)
+        use_adaptive_ab = kwargs.get('use_adaptive_ab', False)
+        initial_ab_threshold = kwargs.get('initial_ab_threshold', 0.7)
+        ab_decay_rate = kwargs.get('ab_decay_rate', 0.95)
+        use_loss_fitness = kwargs.get('use_loss_fitness', True)
+        max_eval_batches = kwargs.get('max_eval_batches', None)
+        post_prune = kwargs.get('post_prune', True)
+        epochs = kwargs.get('epochs', 160)
+        batch_size = kwargs.get('batch_size', 128)
+        learning_rate = kwargs.get('learning_rate', 0.1)
+        momentum = kwargs.get('momentum', 0.9)
+        weight_decay = kwargs.get('weight_decay', 1e-4)
+        lr_milestones = kwargs.get('lr_milestones', [80, 120])
+        lr_gamma = kwargs.get('lr_gamma', 0.1)
+
+        num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
+
+        experiment = GAExperiment(
+            model_name=model,
+            dataset_name=dataset,
+            num_classes=num_classes,
+            population_size=population_size,
+            rec_rate=rec_rate,
+            mut_rate=mut_rate,
+            mig_rate=mig_rate,
+            par_rate=par_rate,
+            min_generations=min_generations,
+            max_generations=max_generations,
+            stagnation_threshold=stagnation_threshold,
+            use_adaptive_ab=use_adaptive_ab,
+            initial_ab_threshold=initial_ab_threshold,
+            ab_decay_rate=ab_decay_rate,
+            use_loss_fitness=use_loss_fitness,
+            max_eval_batches=max_eval_batches,
+            post_prune=post_prune,
+            epochs=epochs,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            momentum=momentum,
+            weight_decay=weight_decay,
+            lr_milestones=lr_milestones,
+            lr_gamma=lr_gamma,
+            seed=seed,
+            device=device,
+        )
+        return experiment.run()
+
     else:
         raise ValueError(f"Unknown algorithm: {algorithm}. "
-                         f"Choose from: imp, earlybird, earlybird_resnet, grasp, synflow")
+                         f"Choose from: imp, earlybird, earlybird_resnet, grasp, synflow, genetic")
 
 
 if __name__ == "__main__":
@@ -2211,6 +2676,14 @@ Examples:
   python -m src.experiments --algorithm synflow --model resnet20 --dataset cifar100 --seed 42 \\
       --rho 10 --epochs 160 --synflow_iters 100
 
+  # Run GA on ResNet20 with CIFAR-10
+  python -m src.experiments --algorithm genetic --model resnet20 --dataset cifar10 --seed 42 \\
+      --population_size 100 --min_generations 100 --max_generations 200 --epochs 160
+
+  # Run GA on ResNet20 with CIFAR-100
+  python -m src.experiments --algorithm genetic --model resnet20 --dataset cifar100 --seed 42 \\
+      --population_size 100 --min_generations 100 --max_generations 200 --epochs 160
+
   # Quick test modes
   python -m src.experiments --mode quick_imp
   python -m src.experiments --mode quick_earlybird
@@ -2221,7 +2694,7 @@ Examples:
     
     # Main arguments
     parser.add_argument("--algorithm", type=str, default="imp",
-                       choices=["imp", "earlybird", "earlybird_resnet", "grasp", "synflow"],
+                       choices=["imp", "earlybird", "earlybird_resnet", "grasp", "synflow", "genetic"],
                        help="Pruning algorithm to use")
     parser.add_argument("--model", type=str, default="resnet20",
                        help="Model architecture (resnet20, vgg16, etc.)")
@@ -2278,6 +2751,33 @@ Examples:
                             help="Number of balanced batches for GraSP gradient accumulation")
     grasp_group.add_argument("--epochs", type=int, default=160,
                             help="Training epochs after GraSP pruning")
+
+    # GA-specific arguments
+    ga_group = parser.add_argument_group('Genetic Algorithm arguments')
+    ga_group.add_argument("--population_size", type=int, default=100,
+                         help="GA population size (default: 100)")
+    ga_group.add_argument("--rec_rate", type=float, default=0.3,
+                         help="Recombination rate (default: 0.3)")
+    ga_group.add_argument("--mut_rate", type=float, default=0.1,
+                         help="Mutation rate (default: 0.1)")
+    ga_group.add_argument("--mig_rate", type=float, default=0.1,
+                         help="Migration rate (default: 0.1)")
+    ga_group.add_argument("--par_rate", type=float, default=0.3,
+                         help="Parent pool rate for mating (default: 0.3)")
+    ga_group.add_argument("--min_generations", type=int, default=100,
+                         help="Minimum number of GA generations (default: 100)")
+    ga_group.add_argument("--max_generations", type=int, default=200,
+                         help="Maximum number of GA generations (default: 200)")
+    ga_group.add_argument("--stagnation_threshold", type=int, default=50,
+                         help="Stop after N generations without improvement (default: 50)")
+    ga_group.add_argument("--use_adaptive_ab", action="store_true", default=False,
+                         help="Use adaptive accuracy bound for population init")
+    ga_group.add_argument("--use_loss_fitness", action="store_true", default=True,
+                         help="Use negative loss as fitness (default: True)")
+    ga_group.add_argument("--max_eval_batches", type=int, default=None,
+                         help="Max batches per fitness evaluation (None=all data)")
+    ga_group.add_argument("--no_post_prune", action="store_true", default=False,
+                         help="Disable post-evolutionary pruning")
 
     # SynFlow-specific arguments
     synflow_group = parser.add_argument_group('SynFlow arguments')
@@ -2371,6 +2871,25 @@ Examples:
             kwargs['batch_size'] = args.batch_size if args.batch_size else 128
             kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 1e-4
 
+        elif args.algorithm == "genetic":
+            kwargs['population_size'] = args.population_size
+            kwargs['rec_rate'] = args.rec_rate
+            kwargs['mut_rate'] = args.mut_rate
+            kwargs['mig_rate'] = args.mig_rate
+            kwargs['par_rate'] = args.par_rate
+            kwargs['min_generations'] = args.min_generations
+            kwargs['max_generations'] = args.max_generations
+            kwargs['stagnation_threshold'] = args.stagnation_threshold
+            kwargs['use_adaptive_ab'] = args.use_adaptive_ab
+            kwargs['use_loss_fitness'] = args.use_loss_fitness
+            kwargs['max_eval_batches'] = args.max_eval_batches
+            kwargs['post_prune'] = not args.no_post_prune
+            kwargs['epochs'] = args.epochs
+            kwargs['lr_milestones'] = args.lr_milestones
+            kwargs['lr_gamma'] = args.lr_gamma
+            kwargs['batch_size'] = args.batch_size if args.batch_size else 128
+            kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 1e-4
+
         # Common arguments
         kwargs['learning_rate'] = args.learning_rate
         kwargs['momentum'] = args.momentum
@@ -2407,5 +2926,13 @@ Examples:
             print(f"Best Test Accuracy: {fr.get('best_test_accuracy', 0):.2f}%")
             print(f"Final Test Accuracy: {fr.get('final_test_accuracy', 0):.2f}%")
             print(f"Pruning Time: {fr.get('pruning_time_seconds', 0):.2f}s")
+            print(f"Total Time: {fr.get('total_time_seconds', 0):.2f}s")
+        elif args.algorithm == "genetic":
+            fr = results.get('final_results', {})
+            print(f"Overall Sparsity: {fr.get('overall_sparsity', 0):.2%}")
+            print(f"Best Test Accuracy: {fr.get('best_test_accuracy', 0):.2f}%")
+            print(f"Final Test Accuracy: {fr.get('final_test_accuracy', 0):.2f}%")
+            print(f"GA Time: {fr.get('ga_time_seconds', 0):.2f}s")
+            print(f"Generations: {fr.get('total_generations', 0)}")
             print(f"Total Time: {fr.get('total_time_seconds', 0):.2f}s")
         print(f"{'='*80}\n")

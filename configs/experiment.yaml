@@ -45,6 +45,23 @@ pruning:
   iterations: 5  # For iterative pruning
   adaptive_threshold: true  # For proposed method
 
+# Genetic Algorithm configuration
+genetic_algorithm:
+  population_size: 100
+  rec_rate: 0.3          # Recombination rate
+  mut_rate: 0.1          # Mutation rate
+  mig_rate: 0.1          # Migration rate (fraction of pop replaced by random)
+  par_rate: 0.3          # Top fraction eligible for mating
+  min_generations: 100   # Minimum GA generations before stagnation check
+  max_generations: 200   # Hard cap on generations
+  stagnation_threshold: 50  # Stop after N gens without improvement
+  use_adaptive_ab: false    # Adaptive accuracy-bound initialisation
+  initial_ab_threshold: 0.7 # Initial accuracy bound (if adaptive AB enabled)
+  ab_decay_rate: 0.95       # Exponential decay for accuracy bound
+  use_loss_fitness: true    # Use negative loss as fitness (true) vs accuracy (false)
+  max_eval_batches: null    # Limit batches per evaluation (null = all data)
+  post_prune: true          # Post-evolutionary pruning for extra sparsity
+
 # Experiment settings
 experiment_settings:
   seeds: [42]  # 3 seeds as per plan

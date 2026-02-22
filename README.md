@@ -91,7 +91,37 @@ python -m src.experiments --algorithm grasp \
 - `--lr_milestones`: Epochs at which to reduce LR (default: [80, 120])
 - `--lr_gamma`: LR decay factor (default: 0.1)
 
-### 4. Common Arguments
+### 4. Genetic Algorithm (GA)
+
+Evolves binary masks over a fixed, randomly-initialised network, then trains
+the discovered sub-network from the masked initialization:
+
+```bash
+python -m src.experiments --algorithm genetic \
+    --model resnet20 \
+    --dataset cifar10 \
+    --seed 42 \
+    --population_size 100 \
+    --min_generations 100 \
+    --max_generations 200 \
+    --epochs 160
+```
+
+**Available GA arguments:**
+- `--population_size`: Population size (default: 100)
+- `--rec_rate`: Recombination rate (default: 0.3)
+- `--mut_rate`: Mutation rate (default: 0.1)
+- `--mig_rate`: Migration rate (default: 0.1)
+- `--par_rate`: Top fraction eligible for mating (default: 0.3)
+- `--min_generations`: Minimum generations before stagnation check (default: 100)
+- `--max_generations`: Maximum generations (default: 200)
+- `--stagnation_threshold`: Stop after N gens without improvement (default: 50)
+- `--use_adaptive_ab`: Use adaptive accuracy-bound initialisation (default: False)
+- `--use_loss_fitness`: Use negative loss as fitness (default: True)
+- `--max_eval_batches`: Limit batches per fitness evaluation (default: None)
+- `--no_post_prune`: Disable post-evolutionary pruning (default: False)
+
+### 5. Common Arguments
 
 All algorithms support:
 - `--model`: Model architecture (resnet20, resnet50, vgg16, vgg19)
@@ -103,7 +133,7 @@ All algorithms support:
 - `--momentum`: SGD momentum (default: 0.9)
 - `--weight_decay`: Weight decay
 
-### 5. Quick Tests
+### 6. Quick Tests
 
 Run quick tests with reduced iterations (for validation):
 ```bash
@@ -143,6 +173,18 @@ python -m src.experiments --algorithm grasp --model resnet20 --dataset cifar10 \
 ```bash
 python -m src.experiments --algorithm grasp --model resnet20 --dataset cifar100 \
     --target_sparsity 0.9 --epochs 160
+```
+
+**GA: ResNet20 on CIFAR-10**
+```bash
+python -m src.experiments --algorithm genetic --model resnet20 --dataset cifar10 \
+    --population_size 100 --min_generations 100 --max_generations 200 --epochs 160
+```
+
+**GA: ResNet20 on CIFAR-100**
+```bash
+python -m src.experiments --algorithm genetic --model resnet20 --dataset cifar100 \
+    --population_size 100 --min_generations 100 --max_generations 200 --epochs 160
 ```
 
 **SynFlow: Iterative data-free pruning on ResNet20**
