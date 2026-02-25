@@ -8,6 +8,7 @@ starting with Iterative Magnitude Pruning (IMP).
 import sys
 import json
 import copy
+import time
 import datetime
 import numpy as np
 import torch
@@ -1404,10 +1405,24 @@ class GAExperiment:
         seed: int = 42,
         device: str = "cuda",
         save_dir: str = "./results",
+        # Checkpoint / resume
+        resume_from: Optional[str] = None,
+        time_limit_seconds: Optional[float] = None,
+        checkpoint_interval: int = 10,
     ):
         self.model_name = model_name
         self.dataset_name = dataset_name
         self.num_classes = num_classes
+
+        # Resume / time-limit
+        self.resume_from = resume_from
+        self.time_limit_seconds = time_limit_seconds
+        self.checkpoint_interval = checkpoint_interval
+
+        # Build checkpoint directory
+        name_tag = (f"ga_{model_name}_{dataset_name}"
+                    f"_pop{population_size}_seed{seed}")
+        self._ckpt_dir = Path(save_dir) / "genetic" / name_tag / "checkpoints"
 
         # GA config
         self.ga_cfg = GAConfig(
@@ -1425,6 +1440,9 @@ class GAExperiment:
             use_loss_fitness=use_loss_fitness,
             max_eval_batches=max_eval_batches,
             post_prune=post_prune,
+            time_limit_seconds=time_limit_seconds,
+            checkpoint_dir=str(self._ckpt_dir),
+            checkpoint_interval=checkpoint_interval,
         )
 
         # Training config
@@ -1473,14 +1491,92 @@ class GAExperiment:
             'seed': self.seed,
         }
 
+    # ------------------------------------------------------------------ #
+    # Training-phase checkpoint helpers
+    # ------------------------------------------------------------------ #
+
+    def _save_train_checkpoint(
+        self,
+        model: nn.Module,
+        optimizer: optim.Optimizer,
+        scheduler,
+        epoch: int,
+        masks: Dict[str, np.ndarray],
+        initial_state: Dict,
+        ga_stats: Dict[str, Any],
+        ga_time: float,
+        history: Dict[str, list],
+        elapsed_train: float,
+    ) -> Path:
+        """Save a training-phase checkpoint so training can resume later."""
+        ckpt_path = self._ckpt_dir / "train_checkpoint.pt"
+        ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+        masks_torch = {k: torch.from_numpy(v) if isinstance(v, np.ndarray) else v
+                       for k, v in masks.items()}
+        ckpt = {
+            'phase': 'train',
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
+            'initial_state': initial_state,
+            'masks': masks_torch,
+            'ga_stats': ga_stats,
+            'ga_time': ga_time,
+            'history': history,
+            'elapsed_train_seconds': elapsed_train,
+        }
+        torch.save(ckpt, ckpt_path)
+        print(f"\n  Training checkpoint saved → {ckpt_path}  "
+              f"(epoch {epoch}/{self.epochs})")
+        return ckpt_path
+
+    @staticmethod
+    def _load_train_checkpoint(
+        path: str | Path,
+    ) -> Dict[str, Any]:
+        """Load a training-phase checkpoint."""
+        return torch.load(Path(path), map_location='cpu', weights_only=False)
+
+    def _time_remaining(self, start: float) -> Optional[float]:
+        """Seconds remaining before the configured wall-clock limit."""
+        if self.time_limit_seconds is None:
+            return None
+        return self.time_limit_seconds - (time.time() - start)
+
+    def _should_stop_training(self, start: float, margin: float = 180.0) -> bool:
+        """True when we are within *margin* seconds of the time limit."""
+        remaining = self._time_remaining(start)
+        if remaining is None:
+            return False
+        return remaining < margin
+
+    # ------------------------------------------------------------------ #
+    # Main run
+    # ------------------------------------------------------------------ #
+
     def run(self) -> Dict[str, Any]:
-        """Run the full GA→train pipeline.
+        """Run the full GA→train pipeline with checkpoint / resume support.
+
+        If ``self.resume_from`` points to a checkpoint file the experiment
+        picks up where it left off:
+
+        * **GA checkpoint** (``phase='evolve'``): resumes the GA search,
+          then trains the discovered sub-network.
+        * **Training checkpoint** (``phase='train'``): skips the GA phase
+          entirely and resumes SGD training from the saved epoch.
+
+        When a ``time_limit_seconds`` is configured the experiment will
+        auto-save a checkpoint and exit gracefully before the deadline.
 
         Returns:
             Dictionary with GA stats, training history, and final metrics.
         """
         import time as _time
         from torch.optim.lr_scheduler import MultiStepLR as _MultiStepLR
+        from src.train import train_epoch, evaluate
+
+        wall_start = _time.time()
 
         print(f"\n{'='*60}")
         print(f"Starting GA Experiment")
@@ -1488,9 +1584,12 @@ class GAExperiment:
         print(f"Population: {self.ga_cfg.population_size}, "
               f"Generations: {self.ga_cfg.min_generations}–{self.ga_cfg.max_generations}")
         print(f"Device: {self.device}")
+        if self.resume_from:
+            print(f"Resuming from: {self.resume_from}")
+        if self.time_limit_seconds:
+            print(f"Time limit: {self.time_limit_seconds:.0f}s "
+                  f"({self.time_limit_seconds / 3600:.1f}h)")
         print(f"{'='*60}\n")
-
-        total_start = _time.time()
 
         # Seed
         set_seed(self.seed)
@@ -1521,19 +1620,68 @@ class GAExperiment:
         # Save initial weights for resetting after GA
         initial_state = copy.deepcopy(model.state_dict())
 
-        # ---- GA mask search ---- #
-        print(f"\nRunning Genetic Algorithm mask search …")
-        ga_start = _time.time()
+        # ============================================================== #
+        #  Determine resume phase                                         #
+        # ============================================================== #
+        resume_phase = None          # None | 'evolve' | 'train'
+        resume_ckpt = None
+        if self.resume_from and Path(self.resume_from).is_file():
+            resume_ckpt = torch.load(
+                self.resume_from, map_location='cpu', weights_only=False
+            )
+            resume_phase = resume_ckpt.get('phase', 'evolve')
+            print(f"  Checkpoint phase: {resume_phase}")
 
-        pruner = GeneticAlgorithmPruner(
-            model=model,
-            train_loader=train_loader,
-            device=self.device,
-            config=self.ga_cfg,
-            verbose=True,
-        )
-        masks, ga_stats = pruner.run()
-        ga_time = _time.time() - ga_start
+        # ============================================================== #
+        #  Phase 1 — GA mask search (skip if resuming from training)      #
+        # ============================================================== #
+        if resume_phase == 'train':
+            # Training checkpoint — reload masks and GA results from ckpt
+            masks_torch = resume_ckpt['masks']
+            masks: Dict[str, np.ndarray] = {
+                k: v.cpu().numpy() if isinstance(v, torch.Tensor) else v
+                for k, v in masks_torch.items()
+            }
+            ga_stats = resume_ckpt['ga_stats']
+            ga_time = resume_ckpt['ga_time']
+            initial_state = resume_ckpt['initial_state']
+            print(f"Skipping GA phase (loaded from training checkpoint)")
+        else:
+            # Fresh GA or resume from GA checkpoint
+            print(f"\nRunning Genetic Algorithm mask search …")
+            ga_start = _time.time()
+
+            resume_info = None
+            if resume_phase == 'evolve':
+                pruner, resume_info = GeneticAlgorithmPruner.load_checkpoint(
+                    path=self.resume_from,
+                    model=model,
+                    train_loader=train_loader,
+                    device=self.device,
+                    config=self.ga_cfg,
+                    verbose=True,
+                )
+            else:
+                pruner = GeneticAlgorithmPruner(
+                    model=model,
+                    train_loader=train_loader,
+                    device=self.device,
+                    config=self.ga_cfg,
+                    verbose=True,
+                )
+
+            masks, ga_stats = pruner.run(resume_info=resume_info)
+            ga_time = _time.time() - ga_start
+
+            # If GA stopped early due to time limit, save & return early
+            if ga_stats.get('stopped_early', False):
+                print("\nGA phase stopped early (time limit). "
+                      "Re-run with --resume_from to continue.")
+                self.results['ga'] = {
+                    'stopped_early': True,
+                    'total_generations': ga_stats['total_generations'],
+                }
+                return self.results
 
         # Compute sparsity from the discovered masks
         total_params = sum(m.size for m in masks.values())
@@ -1549,22 +1697,23 @@ class GAExperiment:
 
         self.results['ga'] = {
             'total_generations': ga_stats['total_generations'],
-            'evolve_time_seconds': ga_stats['evolve_time_seconds'],
+            'evolve_time_seconds': ga_stats.get('evolve_time_seconds', 0),
             'total_ga_time_seconds': ga_time,
-            'best_performance': ga_stats['best_performance'],
-            'best_sparsity': ga_stats['best_sparsity'],
-            'cache_entries': ga_stats['cache_entries'],
+            'best_performance': ga_stats.get('best_performance', 0),
+            'best_sparsity': ga_stats.get('best_sparsity', 0),
+            'cache_entries': ga_stats.get('cache_entries', 0),
             'overall_sparsity': overall_sparsity,
             'layer_sparsities': layer_sparsities,
-            'generation_history': ga_stats['generations'],
-            'ga_config': ga_stats['config'],
+            'generation_history': ga_stats.get('generations', []),
+            'ga_config': ga_stats.get('config', {}),
         }
 
-        # ---- Reset model to initial weights & apply mask ---- #
+        # ============================================================== #
+        #  Phase 2 — Train the discovered sub-network                     #
+        # ============================================================== #
         model.load_state_dict(initial_state)
         apply_masks_to_model(model, masks)
 
-        # ---- Train the discovered sub-network ---- #
         apply_fn = create_mask_apply_fn(model)
         optimizer = optim.SGD(
             model.parameters(),
@@ -1576,28 +1725,90 @@ class GAExperiment:
                                  gamma=self.lr_gamma)
         criterion = nn.CrossEntropyLoss()
 
-        print(f"\nTraining discovered sub-network for {self.epochs} epochs …")
+        # Resume training state if applicable
+        start_epoch = 0
+        prior_train_elapsed = 0.0
+        history: Dict[str, list] = {
+            'train_losses': [], 'train_accs': [],
+            'test_losses': [], 'test_accs': [],
+        }
+
+        if resume_phase == 'train':
+            start_epoch = resume_ckpt['epoch'] + 1
+            prior_train_elapsed = resume_ckpt.get('elapsed_train_seconds', 0.0)
+            history = resume_ckpt.get('history', history)
+            model.load_state_dict(resume_ckpt['model_state_dict'])
+            optimizer.load_state_dict(resume_ckpt['optimizer_state_dict'])
+            if resume_ckpt.get('scheduler_state_dict'):
+                scheduler.load_state_dict(resume_ckpt['scheduler_state_dict'])
+            # Move optimizer tensors to device
+            for state in optimizer.state.values():
+                for k, v in state.items():
+                    if isinstance(v, torch.Tensor):
+                        state[k] = v.to(self.device)
+            print(f"\nResuming training from epoch {start_epoch}/{self.epochs}")
+        else:
+            print(f"\nTraining discovered sub-network for {self.epochs} epochs …")
+
         train_start = _time.time()
+        stopped_training = False
 
-        history = train_epochs(
-            model=model,
-            train_loader=train_loader,
-            test_loader=test_loader,
-            criterion=criterion,
-            optimizer=optimizer,
-            num_epochs=self.epochs,
-            device=self.device,
-            scheduler=scheduler,
-            masks=masks,
-            apply_mask_fn=apply_fn,
-            verbose=True,
-        )
+        pbar = tqdm(range(start_epoch, self.epochs), desc="Training",
+                    disable=False)
+        for epoch in pbar:
+            # Train one epoch
+            train_loss, train_acc = train_epoch(
+                model, train_loader, criterion, optimizer,
+                self.device, masks, apply_fn,
+            )
 
-        train_time = _time.time() - train_start
-        total_time = _time.time() - total_start
+            # Evaluate
+            test_loss, test_acc = evaluate(model, test_loader, criterion,
+                                           self.device)
+
+            if scheduler is not None:
+                scheduler.step()
+
+            history['train_losses'].append(train_loss)
+            history['train_accs'].append(train_acc)
+            history['test_losses'].append(test_loss)
+            history['test_accs'].append(test_acc)
+
+            pbar.set_postfix(
+                train_loss=f"{train_loss:.4f}",
+                train_acc=f"{train_acc:.2f}%",
+                test_acc=f"{test_acc:.2f}%",
+            )
+
+            # Periodic training checkpoint
+            if (self.checkpoint_interval > 0
+                    and (epoch + 1) % self.checkpoint_interval == 0):
+                elapsed_train = prior_train_elapsed + (_time.time() - train_start)
+                self._save_train_checkpoint(
+                    model, optimizer, scheduler, epoch, masks,
+                    initial_state, ga_stats, ga_time,
+                    history, elapsed_train,
+                )
+
+            # Time-limit check during training
+            if self._should_stop_training(wall_start, margin=180.0):
+                elapsed_train = prior_train_elapsed + (_time.time() - train_start)
+                self._save_train_checkpoint(
+                    model, optimizer, scheduler, epoch, masks,
+                    initial_state, ga_stats, ga_time,
+                    history, elapsed_train,
+                )
+                remaining = self._time_remaining(wall_start)
+                print(f"\n⏰ Time limit approaching ({remaining:.0f}s left). "
+                      f"Training checkpoint saved at epoch {epoch + 1}/{self.epochs}.")
+                stopped_training = True
+                break
+
+        train_time = prior_train_elapsed + (_time.time() - train_start)
+        total_time = _time.time() - wall_start
 
         best_test = max(history['test_accs']) if history['test_accs'] else 0.0
-        final_test = history['final_test_acc']
+        final_test = history['test_accs'][-1] if history['test_accs'] else 0.0
 
         self.results['training'] = {
             'train_losses': history['train_losses'],
@@ -1605,6 +1816,7 @@ class GAExperiment:
             'test_losses': history['test_losses'],
             'test_accs': history['test_accs'],
             'training_time_seconds': train_time,
+            'stopped_early': stopped_training,
         }
         self.results['final_results'] = {
             'best_test_accuracy': best_test,
@@ -1614,9 +1826,11 @@ class GAExperiment:
             'training_time_seconds': train_time,
             'total_time_seconds': total_time,
             'total_generations': ga_stats['total_generations'],
+            'completed': not stopped_training,
         }
 
-        print(f"\n✓ Done — best test acc: {best_test:.2f}%, "
+        status = "INTERRUPTED (checkpoint saved)" if stopped_training else "Done"
+        print(f"\n✓ {status} — best test acc: {best_test:.2f}%, "
               f"final test acc: {final_test:.2f}%")
         print(f"  GA time      : {ga_time:.2f}s")
         print(f"  Training time: {train_time:.2f}s")
@@ -2602,6 +2816,9 @@ def run_experiment(
         weight_decay = kwargs.get('weight_decay', 1e-4)
         lr_milestones = kwargs.get('lr_milestones', [80, 120])
         lr_gamma = kwargs.get('lr_gamma', 0.1)
+        resume_from = kwargs.get('resume_from', None)
+        time_limit_seconds = kwargs.get('time_limit_seconds', None)
+        checkpoint_interval = kwargs.get('checkpoint_interval', 10)
 
         num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
 
@@ -2632,6 +2849,9 @@ def run_experiment(
             lr_gamma=lr_gamma,
             seed=seed,
             device=device,
+            resume_from=resume_from,
+            time_limit_seconds=time_limit_seconds,
+            checkpoint_interval=checkpoint_interval,
         )
         return experiment.run()
 
@@ -2779,6 +2999,19 @@ Examples:
     ga_group.add_argument("--no_post_prune", action="store_true", default=False,
                          help="Disable post-evolutionary pruning")
 
+    # Checkpoint / resume arguments (for GA on Kaggle etc.)
+    ckpt_group = parser.add_argument_group('Checkpoint / resume arguments')
+    ckpt_group.add_argument("--resume_from", type=str, default=None,
+                           help="Path to a checkpoint file to resume from "
+                                "(GA or training phase)")
+    ckpt_group.add_argument("--time_limit", type=float, default=None,
+                           help="Wall-clock time limit in seconds. The experiment "
+                                "will auto-save a checkpoint before this deadline. "
+                                "E.g. 39600 for Kaggle 11-hour safety margin")
+    ckpt_group.add_argument("--checkpoint_interval", type=int, default=10,
+                           help="Save a checkpoint every N GA generations / "
+                                "training epochs (default: 10)")
+
     # SynFlow-specific arguments
     synflow_group = parser.add_argument_group('SynFlow arguments')
     synflow_group.add_argument("--rho", type=float, default=10.0,
@@ -2889,6 +3122,9 @@ Examples:
             kwargs['lr_gamma'] = args.lr_gamma
             kwargs['batch_size'] = args.batch_size if args.batch_size else 128
             kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 1e-4
+            kwargs['resume_from'] = args.resume_from
+            kwargs['time_limit_seconds'] = args.time_limit
+            kwargs['checkpoint_interval'] = args.checkpoint_interval
 
         # Common arguments
         kwargs['learning_rate'] = args.learning_rate

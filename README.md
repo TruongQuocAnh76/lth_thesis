@@ -121,6 +121,45 @@ python -m src.experiments --algorithm genetic \
 - `--max_eval_batches`: Limit batches per fitness evaluation (default: None)
 - `--no_post_prune`: Disable post-evolutionary pruning (default: False)
 
+#### Checkpoint / Resume Support (for Kaggle 12-hour sessions)
+
+GA experiments can be paused and resumed across multiple sessions with wall-clock time limits.
+
+**Arguments:**
+- `--time_limit`: Wall-clock time limit in seconds (e.g. `39600` for 11 hours, leaving 1-hour safety margin)
+- `--resume_from`: Path to a checkpoint file to resume from
+- `--checkpoint_interval`: Save checkpoint every N GA generations / training epochs (default: 10)
+
+**Checkpoint location:**
+```
+./results/genetic/ga_{model}_{dataset}_pop{size}_seed{seed}/checkpoints/
+  ├── ga_checkpoint.pt           (GA phase checkpoint)
+  └── train_checkpoint.pt        (training phase checkpoint)
+```
+
+**Example: Kaggle 12-hour session with auto-save**
+```bash
+# Session 1: Run with 39600s (~11h) time limit. Saves checkpoint before deadline.
+python -m src.experiments --algorithm genetic --model resnet20 --dataset cifar10 \
+    --population_size 100 --min_generations 100 --max_generations 200 \
+    --time_limit 39600 --checkpoint_interval 10
+
+# Session 2: Resume from checkpoint when session 1 is interrupted
+python -m src.experiments --algorithm genetic --model resnet20 --dataset cifar10 \
+    --population_size 100 --min_generations 100 --max_generations 200 \
+    --time_limit 39600 --checkpoint_interval 10 \
+    --resume_from ./results/genetic/ga_resnet20_cifar10_pop100_seed42/checkpoints/ga_checkpoint.pt
+```
+
+The experiment will:
+1. **Auto-save** a checkpoint every N generations during GA evolution
+2. **Auto-save** a checkpoint every N epochs during post-GA training
+3. **Check wall-clock time** and save a final checkpoint + gracefully exit before the deadline
+4. **Resume** seamlessly from the last checkpoint, preserving:
+   - GA population, best individual, fitness cache
+   - Training state (model weights, optimizer, scheduler, epoch)
+   - All metrics and history
+
 ### 5. Common Arguments
 
 All algorithms support:
@@ -160,31 +199,21 @@ python -m src.experiments --algorithm earlybird_resnet --model resnet20 --datase
 **Early-Bird: VGG16 on CIFAR-100**
 ```bash
 python -m src.experiments --algorithm earlybird --model vgg16 --dataset cifar100 \
-    --target_sparsity 0.7 --search_epochs 160
+    --target_sparsity 0.5 --search_epochs 160 --finetune_epochs 160
 ```
 
-**GraSP: One-shot pruning on ResNet20**
-```bash
-python -m src.experiments --algorithm grasp --model resnet20 --dataset cifar10 \
-    --target_sparsity 0.9 --epochs 160 --samples_per_class 10 --grasp_T 200
-```
-
-**GraSP: ResNet20 on CIFAR-100**
-```bash
-python -m src.experiments --algorithm grasp --model resnet20 --dataset cifar100 \
-    --target_sparsity 0.9 --epochs 160
-```
-
-**GA: ResNet20 on CIFAR-10**
+**GA: CIFAR-10 with checkpoint/resume**
 ```bash
 python -m src.experiments --algorithm genetic --model resnet20 --dataset cifar10 \
-    --population_size 100 --min_generations 100 --max_generations 200 --epochs 160
+    --population_size 100 --min_generations 100 --max_generations 200 \
+    --time_limit 39600 --checkpoint_interval 10
 ```
 
-**GA: ResNet20 on CIFAR-100**
+**GA: CIFAR-100 (resumed)**
 ```bash
 python -m src.experiments --algorithm genetic --model resnet20 --dataset cifar100 \
-    --population_size 100 --min_generations 100 --max_generations 200 --epochs 160
+    --time_limit 39600 --checkpoint_interval 10 \
+    --resume_from ./results/genetic/ga_resnet20_cifar100_pop100_seed42/checkpoints/ga_checkpoint.pt
 ```
 
 **SynFlow: Iterative data-free pruning on ResNet20**

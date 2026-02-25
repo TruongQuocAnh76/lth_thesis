@@ -27,8 +27,11 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import os
+import pickle
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -241,6 +244,10 @@ class GAConfig:
     use_loss_fitness: bool = True   # True → minimise loss; False → maximise accuracy
     max_eval_batches: Optional[int] = None  # limit batches per evaluation for speed
     post_prune: bool = True         # run post-evolutionary pruning
+    # Checkpoint / resume support (Kaggle 12-hour sessions)
+    time_limit_seconds: Optional[float] = None  # auto-save before this wall-time
+    checkpoint_dir: Optional[str] = None         # where to write checkpoints
+    checkpoint_interval: int = 10                # save every N generations
 
 
 class GeneticAlgorithmPruner:
@@ -277,6 +284,179 @@ class GeneticAlgorithmPruner:
 
         # History tracking
         self.generation_stats: List[Dict[str, Any]] = []
+
+        # Wall-clock start (set when run() begins)
+        self._start_time: Optional[float] = None
+
+    # ----- checkpoint / resume --------------------------------------- #
+
+    def save_checkpoint(
+        self,
+        path: str | Path,
+        population: List[Individual],
+        best_ever: Individual,
+        best_perf_history: List[float],
+        generation: int,
+        elapsed: float,
+        phase: str = "evolve",
+    ) -> Path:
+        """Persist the full GA state so it can be resumed later.
+
+        Args:
+            path: File path for the checkpoint (*.pt).
+            population: Current population list.
+            best_ever: Best individual found so far.
+            best_perf_history: Per-generation best performance list.
+            generation: Current generation index.
+            elapsed: Elapsed seconds before this checkpoint.
+            phase: One of 'evolve' or 'post_prune'.
+
+        Returns:
+            The resolved checkpoint path.
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        ckpt = {
+            'phase': phase,
+            'generation': generation,
+            'elapsed_seconds': elapsed,
+            'population': [
+                {'genome': ind.genome, 'fitness': ind.fitness,
+                 'origin': ind.origin, 'age': ind.age}
+                for ind in population
+            ],
+            'best_ever': {
+                'genome': best_ever.genome,
+                'fitness': best_ever.fitness,
+                'origin': best_ever.origin,
+                'age': best_ever.age,
+            },
+            'best_perf_history': best_perf_history,
+            'generation_stats': self.generation_stats,
+            'cache': {
+                'data': dict(self.cache._cache),
+                'hits': self.cache.hits,
+                'misses': self.cache.misses,
+            },
+            'config': {
+                'population_size': self.cfg.population_size,
+                'rec_rate': self.cfg.rec_rate,
+                'mut_rate': self.cfg.mut_rate,
+                'mig_rate': self.cfg.mig_rate,
+                'par_rate': self.cfg.par_rate,
+                'min_generations': self.cfg.min_generations,
+                'max_generations': self.cfg.max_generations,
+                'stagnation_threshold': self.cfg.stagnation_threshold,
+                'use_adaptive_ab': self.cfg.use_adaptive_ab,
+                'use_loss_fitness': self.cfg.use_loss_fitness,
+                'post_prune': self.cfg.post_prune,
+            },
+            'mask_template_keys': sorted(self.mask_template.keys()),
+            'genome_length': self.genome_length,
+            'numpy_rng_state': np.random.get_state(),
+        }
+        torch.save(ckpt, path)
+        if self.verbose:
+            print(f"\n  Checkpoint saved → {path}  (gen {generation}, "
+                  f"{elapsed:.0f}s elapsed)")
+        return path
+
+    @classmethod
+    def load_checkpoint(
+        cls,
+        path: str | Path,
+        model: nn.Module,
+        train_loader: torch.utils.data.DataLoader,
+        device: torch.device,
+        config: GAConfig | None = None,
+        verbose: bool = True,
+    ) -> Tuple["GeneticAlgorithmPruner", dict]:
+        """Restore a GeneticAlgorithmPruner from a saved checkpoint.
+
+        Args:
+            path: Checkpoint file path (*.pt).
+            model: The *same* model architecture with the *same* initial
+                   weights that were used when the GA started.
+            train_loader: Training data loader.
+            device: Compute device.
+            config: Optional config override (defaults read from checkpoint).
+            verbose: Whether to print progress.
+
+        Returns:
+            (pruner, resume_info) where *resume_info* is a dict with keys
+            ``population``, ``best_ever``, ``best_perf_history``,
+            ``start_generation``, ``elapsed_seconds``, and ``phase``.
+        """
+        path = Path(path)
+        ckpt = torch.load(path, map_location='cpu', weights_only=False)
+
+        # Rebuild pruner
+        pruner = cls(model=model, train_loader=train_loader,
+                     device=device, config=config, verbose=verbose)
+
+        # Restore cache
+        pruner.cache._cache = ckpt['cache']['data']
+        pruner.cache.hits = ckpt['cache']['hits']
+        pruner.cache.misses = ckpt['cache']['misses']
+
+        # Restore generation stats
+        pruner.generation_stats = ckpt['generation_stats']
+
+        # Restore numpy RNG
+        np.random.set_state(ckpt['numpy_rng_state'])
+
+        # Rebuild population
+        population = []
+        for d in ckpt['population']:
+            ind = Individual(
+                genome=d['genome'], fitness=d['fitness'],
+                origin=d['origin'], age=d['age'],
+            )
+            population.append(ind)
+
+        best_d = ckpt['best_ever']
+        best_ever = Individual(
+            genome=best_d['genome'], fitness=best_d['fitness'],
+            origin=best_d['origin'], age=best_d['age'],
+        )
+
+        resume_info = {
+            'population': population,
+            'best_ever': best_ever,
+            'best_perf_history': ckpt['best_perf_history'],
+            'start_generation': ckpt['generation'] + 1,  # resume from next gen
+            'elapsed_seconds': ckpt['elapsed_seconds'],
+            'phase': ckpt['phase'],
+        }
+
+        if verbose:
+            print(f"\n  Checkpoint loaded ← {path}")
+            print(f"    phase       : {ckpt['phase']}")
+            print(f"    generation  : {ckpt['generation']}")
+            print(f"    elapsed     : {ckpt['elapsed_seconds']:.0f}s")
+            print(f"    cache size  : {len(pruner.cache)}")
+            print(f"    best perf   : {best_ever.performance:.4f}")
+
+        return pruner, resume_info
+
+    def _time_remaining(self) -> Optional[float]:
+        """Seconds remaining before the configured time limit, or None."""
+        if self.cfg.time_limit_seconds is None or self._start_time is None:
+            return None
+        return self.cfg.time_limit_seconds - (time.time() - self._start_time)
+
+    def _should_stop_for_time(self, margin_seconds: float = 120.0) -> bool:
+        """True when we are within *margin_seconds* of the time limit."""
+        remaining = self._time_remaining()
+        if remaining is None:
+            return False
+        return remaining < margin_seconds
+
+    def _checkpoint_path(self, tag: str = "ga_checkpoint") -> Path:
+        """Build the default checkpoint file path."""
+        d = self.cfg.checkpoint_dir or "."
+        return Path(d) / f"{tag}.pt"
 
     # ----- evaluation ------------------------------------------------ #
 
@@ -462,8 +642,15 @@ class GeneticAlgorithmPruner:
 
     # ----- main loop ------------------------------------------------- #
 
-    def run(self) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
+    def run(
+        self,
+        resume_info: Optional[dict] = None,
+    ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
         """Execute the full GA and return (best_masks, stats).
+
+        Args:
+            resume_info: If provided, resume from a prior checkpoint.
+                Must be the dict returned by ``load_checkpoint()``.
 
         Returns:
             best_masks: Dict[str, np.ndarray] in the standard mask format.
@@ -471,6 +658,9 @@ class GeneticAlgorithmPruner:
         """
         cfg = self.cfg
         t0 = time.time()
+        self._start_time = t0
+        prior_elapsed = 0.0
+        stopped_early = False
 
         if self.verbose:
             print(f"\n{'='*60}")
@@ -482,17 +672,29 @@ class GeneticAlgorithmPruner:
             print(f"  fitness        : {'loss' if cfg.use_loss_fitness else 'accuracy'}")
             print(f"  adaptive AB    : {cfg.use_adaptive_ab}")
             print(f"  post-pruning   : {cfg.post_prune}")
+            if cfg.time_limit_seconds:
+                print(f"  time limit     : {cfg.time_limit_seconds:.0f}s "
+                      f"({cfg.time_limit_seconds/3600:.1f}h)")
+            if resume_info:
+                print(f"  RESUMING from gen {resume_info['start_generation']}")
             print(f"{'='*60}\n")
 
-        # 1. Initialise
-        population = self._init_population()
-        population = self._evaluate_population(population)
-
-        best_perf_history: List[float] = []
-        best_ever = population[0].clone()
+        # 1. Initialise or resume
+        if resume_info is not None:
+            population = resume_info['population']
+            best_ever = resume_info['best_ever']
+            best_perf_history = resume_info['best_perf_history']
+            start_gen = resume_info['start_generation']
+            prior_elapsed = resume_info.get('elapsed_seconds', 0.0)
+        else:
+            population = self._init_population()
+            population = self._evaluate_population(population)
+            best_perf_history: List[float] = []
+            best_ever = population[0].clone()
+            start_gen = 0
 
         # 2. Evolutionary loop
-        pbar = tqdm(range(cfg.max_generations), desc="GA generation",
+        pbar = tqdm(range(start_gen, cfg.max_generations), desc="GA generation",
                     disable=not self.verbose)
         for gen in pbar:
             # Age everyone
@@ -541,6 +743,32 @@ class GeneticAlgorithmPruner:
                 cache=f"{stat['cache_hit_rate']:.0%}",
             )
 
+            # Periodic checkpoint
+            if (cfg.checkpoint_dir
+                    and cfg.checkpoint_interval > 0
+                    and (gen + 1) % cfg.checkpoint_interval == 0):
+                elapsed = prior_elapsed + (time.time() - t0)
+                self.save_checkpoint(
+                    self._checkpoint_path(),
+                    population, best_ever, best_perf_history,
+                    gen, elapsed, phase="evolve",
+                )
+
+            # Time-limit check: save & break if close to deadline
+            if self._should_stop_for_time(margin_seconds=120.0):
+                elapsed = prior_elapsed + (time.time() - t0)
+                ckpt_path = self._checkpoint_path()
+                self.save_checkpoint(
+                    ckpt_path, population, best_ever, best_perf_history,
+                    gen, elapsed, phase="evolve",
+                )
+                if self.verbose:
+                    remaining = self._time_remaining()
+                    print(f"\n⏰ Time limit approaching ({remaining:.0f}s left). "
+                          f"Checkpoint saved at generation {gen}.")
+                stopped_early = True
+                break
+
             # Termination: min generations met AND stagnation
             if gen >= cfg.min_generations - 1:
                 if self._is_stagnant(best_perf_history, cfg.stagnation_threshold):
@@ -548,13 +776,13 @@ class GeneticAlgorithmPruner:
                         print(f"\nStagnation detected at generation {gen}. Stopping.")
                     break
 
-        evolve_time = time.time() - t0
+        evolve_time = prior_elapsed + (time.time() - t0)
 
-        # 3. Post-evolutionary pruning
-        if cfg.post_prune:
+        # 3. Post-evolutionary pruning (skip if stopped early)
+        if cfg.post_prune and not stopped_early:
             best_ever = self._post_evolutionary_pruning(best_ever)
 
-        total_time = time.time() - t0
+        total_time = prior_elapsed + (time.time() - t0)
 
         # Convert back to mask dict
         best_masks = bitvector_to_masks(best_ever.genome, self.mask_template)
@@ -562,7 +790,8 @@ class GeneticAlgorithmPruner:
         # Final summary
         if self.verbose:
             print(f"\n{'='*60}")
-            print(f"GA completed in {total_time:.1f}s  ({evolve_time:.1f}s evolution)")
+            status = "INTERRUPTED (checkpoint saved)" if stopped_early else "completed"
+            print(f"GA {status} in {total_time:.1f}s  ({evolve_time:.1f}s evolution)")
             print(f"  best performance : {best_ever.performance:.4f}")
             print(f"  best sparsity    : {best_ever.sparsity:.4f}")
             print(f"  cache entries    : {len(self.cache)}")
@@ -576,6 +805,7 @@ class GeneticAlgorithmPruner:
             'best_performance': best_ever.performance,
             'best_sparsity': best_ever.sparsity,
             'cache_entries': len(self.cache),
+            'stopped_early': stopped_early,
             'config': {
                 'population_size': cfg.population_size,
                 'rec_rate': cfg.rec_rate,
