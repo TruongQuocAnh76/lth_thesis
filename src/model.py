@@ -134,6 +134,52 @@ def resnet50(num_classes=10):
     return ResNet(Bottleneck, [3, 4, 6], num_classes=num_classes)
 
 
+class ResNet18CIFAR(nn.Module):
+    """ResNet-18 adapted for CIFAR (32×32 images).
+
+    Standard ResNet-18 uses 4 stages with planes [64, 128, 256, 512]
+    and BasicBlock [2, 2, 2, 2].  For CIFAR we replace the 7×7 conv +
+    max-pool stem with a single 3×3 conv to preserve spatial resolution.
+    """
+
+    def __init__(self, num_classes=10):
+        super().__init__()
+        self.in_planes = 64
+
+        # CIFAR stem: 3×3 conv instead of 7×7 + maxpool
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(64)
+        self.layer1 = self._make_layer(BasicBlock, 64, 2, stride=1)
+        self.layer2 = self._make_layer(BasicBlock, 128, 2, stride=2)
+        self.layer3 = self._make_layer(BasicBlock, 256, 2, stride=2)
+        self.layer4 = self._make_layer(BasicBlock, 512, 2, stride=2)
+        self.linear = nn.Linear(512 * BasicBlock.expansion, num_classes)
+
+    def _make_layer(self, block, planes, num_blocks, stride):
+        strides = [stride] + [1] * (num_blocks - 1)
+        layers = []
+        for s in strides:
+            layers.append(block(self.in_planes, planes, s))
+            self.in_planes = planes * block.expansion
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.layer1(out)
+        out = self.layer2(out)
+        out = self.layer3(out)
+        out = self.layer4(out)
+        out = F.adaptive_avg_pool2d(out, 1)
+        out = out.view(out.size(0), -1)
+        out = self.linear(out)
+        return out
+
+
+def resnet18(num_classes=10):
+    """ResNet-18 for CIFAR datasets (4 stages, [2,2,2,2] BasicBlocks)."""
+    return ResNet18CIFAR(num_classes=num_classes)
+
+
 # VGG Implementation
 class VGG(nn.Module):
     """VGG architecture for CIFAR-10/100."""
@@ -205,7 +251,9 @@ def get_model(model_name, num_classes=10):
     """
     model_name = model_name.lower()
     
-    if model_name == 'resnet20':
+    if model_name == 'resnet18':
+        return resnet18(num_classes=num_classes)
+    elif model_name == 'resnet20':
         return resnet20(num_classes=num_classes)
     elif model_name == 'resnet50':
         return resnet50(num_classes=num_classes)
@@ -214,7 +262,7 @@ def get_model(model_name, num_classes=10):
     elif model_name == 'vgg19':
         return vgg19(num_classes=num_classes)
     else:
-        raise ValueError(f"Unknown model: {model_name}. Supported models: resnet20, resnet50, vgg16, vgg19")
+        raise ValueError(f"Unknown model: {model_name}. Supported models: resnet18, resnet20, resnet50, vgg16, vgg19")
 
 
 def count_parameters(model):

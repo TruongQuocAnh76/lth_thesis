@@ -55,6 +55,7 @@ from src.util import (
 from src.grasp import grasp, get_grasp_sparsity
 from src.synflow import synflow_pruning, apply_synflow_masks, get_synflow_sparsity
 from src.ga import GAConfig, GeneticAlgorithmPruner
+from src.hybrid import hybrid_pruning
 
 
 class IMPExperiment:
@@ -2855,9 +2856,48 @@ def run_experiment(
         )
         return experiment.run()
 
+    elif algorithm.lower() == "hybrid":
+        # Hybrid parameters
+        target_sparsity = kwargs.get('target_sparsity', 0.9)
+        oneshot_ratio = kwargs.get('oneshot_ratio', 0.7)
+        iterative_step = kwargs.get('iterative_step', None)
+        initial_epochs = kwargs.get('initial_epochs', 160)
+        initial_lr = kwargs.get('initial_lr', 0.01)
+        oneshot_finetune_max_epochs = kwargs.get('oneshot_finetune_max_epochs', 200)
+        oneshot_finetune_patience = kwargs.get('oneshot_finetune_patience', 200)
+        iter_finetune_max_epochs = kwargs.get('iter_finetune_max_epochs', 10)
+        iter_finetune_patience = kwargs.get('iter_finetune_patience', 10)
+        batch_size = kwargs.get('batch_size', 128)
+        momentum = kwargs.get('momentum', 0.9)
+        weight_decay = kwargs.get('weight_decay', 5e-4)
+        use_global_pruning = kwargs.get('use_global_pruning', True)
+
+        num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
+
+        return hybrid_pruning(
+            model_name=model,
+            dataset_name=dataset,
+            num_classes=num_classes,
+            target_sparsity=target_sparsity,
+            oneshot_ratio=oneshot_ratio,
+            iterative_step=iterative_step,
+            initial_epochs=initial_epochs,
+            initial_lr=initial_lr,
+            oneshot_finetune_max_epochs=oneshot_finetune_max_epochs,
+            oneshot_finetune_patience=oneshot_finetune_patience,
+            iter_finetune_max_epochs=iter_finetune_max_epochs,
+            iter_finetune_patience=iter_finetune_patience,
+            batch_size=batch_size,
+            momentum=momentum,
+            weight_decay=weight_decay,
+            use_global_pruning=use_global_pruning,
+            seed=seed,
+            device=device,
+        )
+
     else:
         raise ValueError(f"Unknown algorithm: {algorithm}. "
-                         f"Choose from: imp, earlybird, earlybird_resnet, grasp, synflow, genetic")
+                         f"Choose from: imp, earlybird, earlybird_resnet, grasp, synflow, genetic, hybrid")
 
 
 if __name__ == "__main__":
@@ -2904,6 +2944,14 @@ Examples:
   python -m src.experiments --algorithm genetic --model resnet20 --dataset cifar100 --seed 42 \\
       --population_size 100 --min_generations 100 --max_generations 200 --epochs 160
 
+  # Run Hybrid on ResNet20 with CIFAR-10 (90% sparsity)
+  python -m src.experiments --algorithm hybrid --model resnet20 --dataset cifar10 --seed 42 \\
+      --target_sparsity 0.9 --oneshot_ratio 0.7 --initial_epochs 160
+
+  # Run Hybrid on ResNet20 with CIFAR-100 (70% sparsity, 10% iterative step)
+  python -m src.experiments --algorithm hybrid --model resnet20 --dataset cifar100 --seed 42 \\
+      --target_sparsity 0.7 --oneshot_ratio 0.7 --iterative_step 0.10
+
   # Quick test modes
   python -m src.experiments --mode quick_imp
   python -m src.experiments --mode quick_earlybird
@@ -2914,7 +2962,7 @@ Examples:
     
     # Main arguments
     parser.add_argument("--algorithm", type=str, default="imp",
-                       choices=["imp", "earlybird", "earlybird_resnet", "grasp", "synflow", "genetic"],
+                       choices=["imp", "earlybird", "earlybird_resnet", "grasp", "synflow", "genetic", "hybrid"],
                        help="Pruning algorithm to use")
     parser.add_argument("--model", type=str, default="resnet20",
                        help="Model architecture (resnet20, vgg16, etc.)")
@@ -3020,6 +3068,27 @@ Examples:
     synflow_group.add_argument("--synflow_iters", type=int, default=100,
                               help="Number of iterative SynFlow pruning rounds (default: 100)")
 
+    # Hybrid-specific arguments
+    hybrid_group = parser.add_argument_group('Hybrid arguments')
+    hybrid_group.add_argument("--oneshot_ratio", type=float, default=0.7,
+                             help="Fraction of target sparsity to prune in one shot (default: 0.7)")
+    hybrid_group.add_argument("--iterative_step", type=float, default=None,
+                             help="Fraction of remaining weights per iterative step "
+                                  "(default: auto — 10%% if target<0.8, else 2%%)")
+    hybrid_group.add_argument("--initial_epochs", type=int, default=160,
+                             help="Dense training epochs before pruning (default: 160)")
+    hybrid_group.add_argument("--initial_lr", type=float, default=0.01,
+                             help="Learning rate for initial training (default: 0.01). "
+                                  "Fine-tuning uses 1/10th of this")
+    hybrid_group.add_argument("--oneshot_finetune_max_epochs", type=int, default=200,
+                             help="Max epochs for one-shot fine-tuning (default: 200)")
+    hybrid_group.add_argument("--oneshot_finetune_patience", type=int, default=200,
+                             help="Early-stopping patience for one-shot fine-tuning (default: 200)")
+    hybrid_group.add_argument("--iter_finetune_max_epochs", type=int, default=10,
+                             help="Max epochs per iterative fine-tuning step (default: 10)")
+    hybrid_group.add_argument("--iter_finetune_patience", type=int, default=10,
+                             help="Early-stopping patience per iterative step (default: 10)")
+
     # Common training arguments
     train_group = parser.add_argument_group('Training arguments')
     train_group.add_argument("--batch_size", type=int, default=None,
@@ -3104,6 +3173,20 @@ Examples:
             kwargs['batch_size'] = args.batch_size if args.batch_size else 128
             kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 1e-4
 
+        elif args.algorithm == "hybrid":
+            kwargs['target_sparsity'] = args.target_sparsity
+            kwargs['oneshot_ratio'] = args.oneshot_ratio
+            kwargs['iterative_step'] = args.iterative_step
+            kwargs['initial_epochs'] = args.initial_epochs
+            kwargs['initial_lr'] = args.initial_lr
+            kwargs['oneshot_finetune_max_epochs'] = args.oneshot_finetune_max_epochs
+            kwargs['oneshot_finetune_patience'] = args.oneshot_finetune_patience
+            kwargs['iter_finetune_max_epochs'] = args.iter_finetune_max_epochs
+            kwargs['iter_finetune_patience'] = args.iter_finetune_patience
+            kwargs['use_global_pruning'] = args.use_global_pruning
+            kwargs['batch_size'] = args.batch_size if args.batch_size else 128
+            kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 5e-4
+
         elif args.algorithm == "genetic":
             kwargs['population_size'] = args.population_size
             kwargs['rec_rate'] = args.rec_rate
@@ -3170,5 +3253,12 @@ Examples:
             print(f"Final Test Accuracy: {fr.get('final_test_accuracy', 0):.2f}%")
             print(f"GA Time: {fr.get('ga_time_seconds', 0):.2f}s")
             print(f"Generations: {fr.get('total_generations', 0)}")
+            print(f"Total Time: {fr.get('total_time_seconds', 0):.2f}s")
+        elif args.algorithm == "hybrid":
+            fr = results.get('final_results', {})
+            print(f"Final Sparsity: {fr.get('final_sparsity', 0):.2%}")
+            print(f"Initial Test Accuracy: {fr.get('initial_test_accuracy', 0):.2f}%")
+            print(f"Best Phase Test Accuracy: {fr.get('best_phase_test_accuracy', 0):.2f}%")
+            print(f"Final Test Accuracy: {fr.get('final_test_accuracy', 0):.2f}%")
             print(f"Total Time: {fr.get('total_time_seconds', 0):.2f}s")
         print(f"{'='*80}\n")

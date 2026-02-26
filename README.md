@@ -160,7 +160,38 @@ The experiment will:
    - Training state (model weights, optimizer, scheduler, epoch)
    - All metrics and history
 
-### 5. Common Arguments
+### 5. Hybrid Pruning (One-Shot + Iterative Geometric)
+
+Combines a large one-shot magnitude prune with iterative geometric refinement.
+Phases: dense training → large prune + extended fine-tune → iterative small prunes + short fine-tunes.
+
+```bash
+python -m src.experiments --algorithm hybrid \
+    --model resnet20 \
+    --dataset cifar10 \
+    --seed 42 \
+    --target_sparsity 0.9 \
+    --oneshot_ratio 0.7 \
+    --initial_epochs 160 \
+    --oneshot_finetune_max_epochs 200 \
+    --oneshot_finetune_patience 200 \
+    --iter_finetune_max_epochs 10 \
+    --iter_finetune_patience 10
+```
+
+**Available Hybrid arguments:**
+- `--target_sparsity`: Target overall sparsity (default: 0.9)
+- `--oneshot_ratio`: Fraction of target to prune in one shot (default: 0.7, i.e. 70% of target)
+- `--iterative_step`: Fraction of remaining weights to prune per iterative step. Auto-selected if omitted: 10% when target < 80%, 2% when target > 80%
+- `--initial_epochs`: Dense training epochs (default: 160)
+- `--initial_lr`: Learning rate for initial training (default: 0.01). Fine-tuning uses 1/10th of this
+- `--oneshot_finetune_max_epochs`: Max epochs for fine-tuning after one-shot prune (default: 200)
+- `--oneshot_finetune_patience`: Early-stopping patience for one-shot fine-tuning (default: 200)
+- `--iter_finetune_max_epochs`: Max epochs per iterative fine-tuning step (default: 10)
+- `--iter_finetune_patience`: Early-stopping patience per iterative step (default: 10)
+- `--use_global_pruning`: Use global magnitude pruning (default: True)
+
+### 6. Common Arguments
 
 All algorithms support:
 - `--model`: Model architecture (resnet20, resnet50, vgg16, vgg19)
@@ -172,7 +203,7 @@ All algorithms support:
 - `--momentum`: SGD momentum (default: 0.9)
 - `--weight_decay`: Weight decay
 
-### 6. Quick Tests
+### 7. Quick Tests
 
 Run quick tests with reduced iterations (for validation):
 ```bash
@@ -228,7 +259,20 @@ python -m src.experiments --algorithm synflow --model resnet20 --dataset cifar10
     --rho 2.5 --epochs 160 --synflow_iters 100
 ```
 
-### 4. SynFlow (Synaptic Flow)
+**Hybrid: ResNet20 to 90% sparsity (one-shot 63% + iterative 2%)**
+```bash
+python -m src.experiments --algorithm hybrid --model resnet20 --dataset cifar10 \
+    --target_sparsity 0.9 --oneshot_ratio 0.7 \
+    --oneshot_finetune_max_epochs 200 --iter_finetune_max_epochs 10
+```
+
+**Hybrid: CIFAR-100 moderate sparsity (one-shot + iterative 10%)**
+```bash
+python -m src.experiments --algorithm hybrid --model resnet20 --dataset cifar100 \
+    --target_sparsity 0.7 --oneshot_ratio 0.7 --iterative_step 0.10
+```
+
+### 5. SynFlow (Synaptic Flow)
 
 Data-free iterative pruning at initialization with exponential schedule:
 
@@ -249,7 +293,38 @@ python -m src.experiments --algorithm synflow \
 - `--lr_milestones`: Epochs at which to reduce LR (default: [80, 120])
 - `--lr_gamma`: LR decay factor (default: 0.1)
 
-### 5. Common Arguments
+### 6. Hybrid Pruning (One-Shot + Iterative Geometric)
+
+Combines a large one-shot magnitude prune with iterative geometric refinement.
+Phases: dense training → large prune + extended fine-tune → iterative small prunes + short fine-tunes.
+
+```bash
+python -m src.experiments --algorithm hybrid \
+    --model resnet20 \
+    --dataset cifar10 \
+    --seed 42 \
+    --target_sparsity 0.9 \
+    --oneshot_ratio 0.7 \
+    --initial_epochs 160 \
+    --oneshot_finetune_max_epochs 200 \
+    --oneshot_finetune_patience 200 \
+    --iter_finetune_max_epochs 10 \
+    --iter_finetune_patience 10
+```
+
+**Available Hybrid arguments:**
+- `--target_sparsity`: Target overall sparsity (default: 0.9)
+- `--oneshot_ratio`: Fraction of target to prune in one shot (default: 0.7, i.e. 70% of target)
+- `--iterative_step`: Fraction of remaining weights to prune per iterative step. Auto-selected if omitted: 10% when target < 80%, 2% when target > 80%
+- `--initial_epochs`: Dense training epochs (default: 160)
+- `--initial_lr`: Learning rate for initial training (default: 0.01). Fine-tuning uses 1/10th of this
+- `--oneshot_finetune_max_epochs`: Max epochs for fine-tuning after one-shot prune (default: 200)
+- `--oneshot_finetune_patience`: Early-stopping patience for one-shot fine-tuning (default: 200)
+- `--iter_finetune_max_epochs`: Max epochs per iterative fine-tuning step (default: 10)
+- `--iter_finetune_patience`: Early-stopping patience per iterative step (default: 10)
+- `--use_global_pruning`: Use global magnitude pruning (default: True)
+
+### 7. Common Arguments
 
 All algorithms support:
 - `--model`: Model architecture (resnet20, resnet50, vgg16, vgg19)
@@ -261,7 +336,7 @@ All algorithms support:
 - `--momentum`: SGD momentum (default: 0.9)
 - `--weight_decay`: Weight decay
 
-### 6. Quick Tests
+### 8. Quick Tests
 
 Run quick tests with reduced iterations (for validation):
 ```bash
