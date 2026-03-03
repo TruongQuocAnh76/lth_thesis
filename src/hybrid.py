@@ -30,6 +30,7 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from typing import Dict, List, Any, Optional, Callable, Tuple
 from tqdm import tqdm
+from torch.cuda.amp import GradScaler
 
 from src.train import train_epoch, evaluate
 from src.pruning import (
@@ -239,6 +240,7 @@ def _finetune(
         else None
     )
     stopper = EarlyStopper(patience=patience, mode="max")
+    scaler = GradScaler() if torch.cuda.is_available() else None
 
     history: Dict[str, List] = {
         "train_losses": [],
@@ -254,6 +256,7 @@ def _finetune(
         train_loss, train_acc = train_epoch(
             model, train_loader, criterion, optimizer, device,
             masks=masks, apply_mask_fn=apply_mask_fn,
+            scaler=scaler,
         )
         test_loss, test_acc = evaluate(model, test_loader, criterion, device)
 
@@ -537,7 +540,7 @@ def hybrid_pruning(
             _ckpt_path(),
             phase=phase,
             step_idx=step_idx,
-            model_state=model.state_dict(),
+            model_state=raw_model.state_dict(),
             masks=masks,
             results=results,
             config=config,
@@ -577,13 +580,17 @@ def hybrid_pruning(
 
     # Model
     model = get_model(model_name, num_classes=num_classes).to(device)
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs!")
+        model = torch.nn.DataParallel(model)
+    raw_model = model.module if isinstance(model, torch.nn.DataParallel) else model
     param_info = count_parameters(model)
     print(f"Model parameters: {param_info['total']:,}")
 
     criterion = nn.CrossEntropyLoss()
 
     # Initial masks (all ones)
-    initial_weights = get_prunable_layers(model)
+    initial_weights = get_prunable_layers(raw_model)
     masks = create_initial_masks(initial_weights)
 
     # ------------------------------------------------------------------ #
@@ -594,7 +601,7 @@ def hybrid_pruning(
     if resume_from is not None:
         ckpt = load_hybrid_checkpoint(resume_from, verbose=verbose)
         prior_elapsed = ckpt["elapsed_seconds"]
-        model.load_state_dict(ckpt["model_state"])
+        raw_model.load_state_dict(ckpt["model_state"])
         model.to(device)
         masks = ckpt["masks"]
         results = ckpt["results"]
@@ -700,7 +707,7 @@ def hybrid_pruning(
               f"current sparsity={current_sparsity:.2%}) ---")
 
         # Get weights for ranking
-        trained_weights = get_prunable_layers(model)
+        trained_weights = get_prunable_layers(raw_model)
 
         # Prune
         if use_global_pruning:
@@ -710,8 +717,8 @@ def hybrid_pruning(
             masks = prune_by_percent(percents, masks, trained_weights)
 
         # Apply masks
-        apply_masks_to_model(model, masks)
-        apply_fn = create_mask_apply_fn(model)
+        apply_masks_to_model(raw_model, masks)
+        apply_fn = create_mask_apply_fn(raw_model)
 
         new_sparsity = get_overall_sparsity(masks)
         print(f"  Sparsity after prune: {new_sparsity:.2%}")

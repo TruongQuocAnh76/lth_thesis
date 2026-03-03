@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import MultiStepLR
+from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 from typing import Optional, Dict, List, Any, Callable, Tuple
 import numpy as np
@@ -15,7 +16,8 @@ def train_epoch(
     optimizer: optim.Optimizer,
     device: torch.device,
     masks: Optional[Dict[str, Any]] = None,
-    apply_mask_fn: Optional[Callable] = None
+    apply_mask_fn: Optional[Callable] = None,
+    scaler: Optional[GradScaler] = None,
 ) -> tuple:
     """Train model for one epoch.
     
@@ -27,6 +29,9 @@ def train_epoch(
         device: Device to use for training (cuda/cpu)
         masks: Optional dictionary of pruning masks
         apply_mask_fn: Optional function to apply masks to model
+        scaler: Optional GradScaler for mixed-precision (AMP) training.
+            When provided, forward passes run under ``autocast`` and
+            gradients are scaled automatically.
     
     Returns:
         Tuple of (average_loss, accuracy_percentage)
@@ -40,10 +45,19 @@ def train_epoch(
         data, target = data.to(device), target.to(device)
         
         optimizer.zero_grad()
-        output = model(data)
-        loss = criterion(output, target)
-        loss.backward()
-        optimizer.step()
+
+        if scaler is not None:
+            with autocast():
+                output = model(data)
+                loss = criterion(output, target)
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            output = model(data)
+            loss = criterion(output, target)
+            loss.backward()
+            optimizer.step()
         
         # Apply mask after gradient update if pruning is active
         if masks is not None:
