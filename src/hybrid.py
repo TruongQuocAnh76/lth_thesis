@@ -20,12 +20,15 @@ Reference implementation: ``pruning-benchmark/`` ``HybridStepScheduler``.
 
 import copy
 import math
+import time as _time
+from pathlib import Path
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from typing import Dict, List, Any, Optional, Callable
+from typing import Dict, List, Any, Optional, Callable, Tuple
 from tqdm import tqdm
 
 from src.train import train_epoch, evaluate
@@ -287,6 +290,92 @@ def _finetune(
 
 
 # =========================================================================
+# Checkpoint helpers
+# =========================================================================
+
+def save_hybrid_checkpoint(
+    path: str | Path,
+    *,
+    phase: str,
+    step_idx: int,
+    model_state: dict,
+    masks: Dict[str, np.ndarray],
+    results: Dict[str, Any],
+    config: Dict[str, Any],
+    elapsed_seconds: float,
+    numpy_rng_state: dict | None = None,
+    torch_rng_state: Any = None,
+    verbose: bool = True,
+) -> Path:
+    """Persist the full hybrid-pruning state so it can be resumed later.
+
+    Args:
+        path: File path for the checkpoint (``*.pt``).
+        phase: One of ``'initial_training'``, ``'pruning'``, or ``'done'``.
+        step_idx: Current pruning step index (``-1`` during initial training).
+        model_state: ``model.state_dict()``.
+        masks: Current pruning masks.
+        results: Partially-built results dict.
+        config: Experiment configuration dict.
+        elapsed_seconds: Wall-clock seconds elapsed so far.
+        numpy_rng_state: ``np.random.get_state()``.
+        torch_rng_state: ``torch.random.get_rng_state()``.
+        verbose: Print confirmation message.
+
+    Returns:
+        The resolved checkpoint path.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    ckpt = {
+        "phase": phase,
+        "step_idx": step_idx,
+        "model_state": model_state,
+        "masks": masks,
+        "results": results,
+        "config": config,
+        "elapsed_seconds": elapsed_seconds,
+        "numpy_rng_state": numpy_rng_state or np.random.get_state(),
+        "torch_rng_state": torch_rng_state or torch.random.get_rng_state(),
+    }
+    torch.save(ckpt, path)
+    if verbose:
+        print(f"\n  Checkpoint saved → {path}  "
+              f"(phase={phase}, step={step_idx}, {elapsed_seconds:.0f}s elapsed)")
+    return path
+
+
+def load_hybrid_checkpoint(
+    path: str | Path,
+    verbose: bool = True,
+) -> Dict[str, Any]:
+    """Load a hybrid-pruning checkpoint from disk.
+
+    Args:
+        path: Checkpoint file path (``*.pt``).
+        verbose: Print summary on load.
+
+    Returns:
+        Dictionary with keys ``phase``, ``step_idx``, ``model_state``,
+        ``masks``, ``results``, ``config``, ``elapsed_seconds``,
+        ``numpy_rng_state``, and ``torch_rng_state``.
+    """
+    path = Path(path)
+    ckpt = torch.load(path, map_location="cpu", weights_only=False)
+
+    if verbose:
+        print(f"\n  Checkpoint loaded ← {path}")
+        print(f"    phase          : {ckpt['phase']}")
+        print(f"    step_idx       : {ckpt['step_idx']}")
+        print(f"    elapsed        : {ckpt['elapsed_seconds']:.0f}s")
+        n_phases = len(ckpt['results'].get('phases', []))
+        print(f"    phases saved   : {n_phases}")
+
+    return ckpt
+
+
+# =========================================================================
 # Main hybrid pruning entry point
 # =========================================================================
 
@@ -317,6 +406,11 @@ def hybrid_pruning(
     seed: int = 42,
     device: str = "cuda",
     verbose: bool = True,
+    # -- Checkpoint / resume support -----------------------------------
+    checkpoint_dir: Optional[str] = "results",
+    checkpoint_interval: int = 1,
+    time_limit_seconds: Optional[float] = None,
+    resume_from: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run the complete hybrid pruning experiment.
 
@@ -358,6 +452,18 @@ def hybrid_pruning(
         seed: Random seed.
         device: ``'cuda'`` or ``'cpu'``.
         verbose: Show progress bars.
+        checkpoint_dir: Directory for checkpoint files.  Defaults to
+            ``'results'``.  When set, a checkpoint is written after
+            initial training and after every ``checkpoint_interval``
+            pruning steps.
+        checkpoint_interval: Save a checkpoint every *N* pruning
+            steps (default 1 = every step).
+        time_limit_seconds: Optional wall-clock budget in seconds.
+            When the remaining time drops below 120 s the current
+            state is saved and the function returns early.
+        resume_from: Path to a checkpoint file (``*.pt``) written by
+            a previous run.  The experiment resumes from the saved
+            phase and step.
 
     Returns:
         Dictionary containing:
@@ -366,8 +472,6 @@ def hybrid_pruning(
         - ``'phases'``: list of per-phase dicts (one-shot + iterative).
         - ``'final_results'``: summary metrics.
     """
-    import time as _time
-
     device = torch.device(device if torch.cuda.is_available() else "cpu")
 
     # Auto-select iterative step if not provided
@@ -408,6 +512,40 @@ def hybrid_pruning(
     results: Dict[str, Any] = {"config": config, "phases": []}
 
     # ------------------------------------------------------------------ #
+    # Checkpoint / time-limit helpers
+    # ------------------------------------------------------------------ #
+    def _ckpt_path(tag: str = "hybrid_checkpoint") -> Path:
+        d = checkpoint_dir or "."
+        return Path(d) / f"{tag}.pt"
+
+    def _elapsed() -> float:
+        return prior_elapsed + (_time.time() - total_start)
+
+    def _time_remaining() -> Optional[float]:
+        if time_limit_seconds is None:
+            return None
+        return time_limit_seconds - _elapsed()
+
+    def _should_stop_for_time(margin: float = 120.0) -> bool:
+        remaining = _time_remaining()
+        if remaining is None:
+            return False
+        return remaining < margin
+
+    def _save_ckpt(phase: str, step_idx: int) -> Path:
+        return save_hybrid_checkpoint(
+            _ckpt_path(),
+            phase=phase,
+            step_idx=step_idx,
+            model_state=model.state_dict(),
+            masks=masks,
+            results=results,
+            config=config,
+            elapsed_seconds=_elapsed(),
+            verbose=verbose,
+        )
+
+    # ------------------------------------------------------------------ #
     # Setup
     # ------------------------------------------------------------------ #
     print(f"\n{'='*60}")
@@ -419,9 +557,17 @@ def hybrid_pruning(
     print(f"Iterative step: {iterative_step:.1%} of remaining  "
           f"({len(steps)-1} iterative steps)")
     print(f"Device: {device}")
+    if time_limit_seconds is not None:
+        print(f"Time limit: {time_limit_seconds:.0f}s "
+              f"({time_limit_seconds/3600:.1f}h)")
+    if resume_from is not None:
+        print(f"Resuming from: {resume_from}")
     print(f"{'='*60}\n")
 
     total_start = _time.time()
+    prior_elapsed = 0.0
+    stopped_early = False
+    start_step_idx = 0  # which pruning step to start from
     set_seed(seed)
 
     # Data
@@ -441,41 +587,88 @@ def hybrid_pruning(
     masks = create_initial_masks(initial_weights)
 
     # ------------------------------------------------------------------ #
+    # Resume from checkpoint (if provided)
+    # ------------------------------------------------------------------ #
+    skip_initial_training = False
+
+    if resume_from is not None:
+        ckpt = load_hybrid_checkpoint(resume_from, verbose=verbose)
+        prior_elapsed = ckpt["elapsed_seconds"]
+        model.load_state_dict(ckpt["model_state"])
+        model.to(device)
+        masks = ckpt["masks"]
+        results = ckpt["results"]
+        # Restore RNG states
+        np.random.set_state(ckpt["numpy_rng_state"])
+        torch.random.set_rng_state(ckpt["torch_rng_state"])
+
+        if ckpt["phase"] == "initial_training":
+            # Initial training was completed; skip it and start pruning
+            skip_initial_training = True
+            start_step_idx = 0
+        elif ckpt["phase"] == "pruning":
+            skip_initial_training = True
+            start_step_idx = ckpt["step_idx"] + 1  # resume from next step
+        elif ckpt["phase"] == "done":
+            print("Checkpoint indicates experiment already finished.")
+            skip_initial_training = True
+            start_step_idx = len(steps)  # skip all pruning steps
+
+        print(f"  Resuming: skip_initial_training={skip_initial_training}, "
+              f"start_step_idx={start_step_idx}")
+
+    # ------------------------------------------------------------------ #
     # Phase 1: Initial (dense) training
     # ------------------------------------------------------------------ #
-    print(f"\n--- Phase 1: Initial training ({initial_epochs} epochs, "
-          f"lr={initial_lr}) ---")
+    if not skip_initial_training:
+        print(f"\n--- Phase 1: Initial training ({initial_epochs} epochs, "
+              f"lr={initial_lr}) ---")
 
-    optimizer = optim.SGD(
-        model.parameters(),
-        lr=initial_lr,
-        momentum=momentum,
-        weight_decay=weight_decay,
-    )
-    lr_scheduler = CosineAnnealingLR(optimizer, T_max=initial_epochs)
+        optimizer = optim.SGD(
+            model.parameters(),
+            lr=initial_lr,
+            momentum=momentum,
+            weight_decay=weight_decay,
+        )
+        lr_scheduler = CosineAnnealingLR(optimizer, T_max=initial_epochs)
 
-    from src.train import train_epochs
+        from src.train import train_epochs
 
-    init_history = train_epochs(
-        model=model,
-        train_loader=train_loader,
-        test_loader=test_loader,
-        criterion=criterion,
-        optimizer=optimizer,
-        num_epochs=initial_epochs,
-        device=device,
-        scheduler=lr_scheduler,
-        verbose=verbose,
-    )
-    init_test_acc = init_history["final_test_acc"]
-    results["initial_training"] = {
-        "train_losses": init_history["train_losses"],
-        "train_accs": init_history["train_accs"],
-        "test_losses": init_history["test_losses"],
-        "test_accs": init_history["test_accs"],
-        "final_test_acc": init_test_acc,
-    }
-    print(f"Initial training done — test acc: {init_test_acc:.2f}%")
+        init_history = train_epochs(
+            model=model,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            criterion=criterion,
+            optimizer=optimizer,
+            num_epochs=initial_epochs,
+            device=device,
+            scheduler=lr_scheduler,
+            verbose=verbose,
+        )
+        init_test_acc = init_history["final_test_acc"]
+        results["initial_training"] = {
+            "train_losses": init_history["train_losses"],
+            "train_accs": init_history["train_accs"],
+            "test_losses": init_history["test_losses"],
+            "test_accs": init_history["test_accs"],
+            "final_test_acc": init_test_acc,
+        }
+        print(f"Initial training done — test acc: {init_test_acc:.2f}%")
+
+        # Checkpoint after initial training
+        if checkpoint_dir is not None:
+            _save_ckpt(phase="initial_training", step_idx=-1)
+
+        # Time-limit check after initial training
+        if _should_stop_for_time():
+            print(f"\n  Time limit approaching ({_time_remaining():.0f}s left). "
+                  "Stopping after initial training.")
+            stopped_early = True
+    else:
+        init_test_acc = results.get("initial_training", {}).get(
+            "final_test_acc", 0.0
+        )
+        from src.train import train_epochs  # ensure import is available
 
     # ------------------------------------------------------------------ #
     # Pruning loop (one-shot + iterative steps)
@@ -483,6 +676,13 @@ def hybrid_pruning(
     finetune_lr = initial_lr / 10.0  # reduced LR for fine-tuning
 
     for step_idx, prune_ratio in enumerate(steps):
+        # Skip steps already completed (when resuming)
+        if step_idx < start_step_idx:
+            continue
+
+        # Time-limit guard
+        if stopped_early:
+            break
         is_oneshot = step_idx == 0
         phase_label = "one-shot" if is_oneshot else f"iter-{step_idx}"
 
@@ -559,13 +759,32 @@ def hybrid_pruning(
               f"best acc: {ft_history['best_test_acc']:.2f}%, "
               f"final acc: {phase_test_acc:.2f}%")
 
+        # Periodic checkpoint
+        if (checkpoint_dir is not None
+                and checkpoint_interval > 0
+                and (step_idx + 1) % checkpoint_interval == 0):
+            _save_ckpt(phase="pruning", step_idx=step_idx)
+
+        # Time-limit check
+        if _should_stop_for_time():
+            remaining = _time_remaining()
+            _save_ckpt(phase="pruning", step_idx=step_idx)
+            print(f"\n  Time limit approaching ({remaining:.0f}s left). "
+                  f"Checkpoint saved at step {step_idx}.")
+            stopped_early = True
+            break
+
     # ------------------------------------------------------------------ #
     # Summary
     # ------------------------------------------------------------------ #
-    total_time = _time.time() - total_start
+    total_time = _elapsed()
     final_sparsity = get_overall_sparsity(masks)
     _, final_test_acc = evaluate(model, test_loader, criterion, device)
-    best_phase_acc = max(p["best_test_acc"] for p in results["phases"])
+    best_phase_acc = (
+        max(p["best_test_acc"] for p in results["phases"])
+        if results["phases"]
+        else 0.0
+    )
 
     results["final_results"] = {
         "final_sparsity": final_sparsity,
@@ -573,10 +792,16 @@ def hybrid_pruning(
         "best_phase_test_accuracy": best_phase_acc,
         "initial_test_accuracy": init_test_acc,
         "total_time_seconds": total_time,
+        "stopped_early": stopped_early,
     }
 
+    # Final checkpoint
+    if checkpoint_dir is not None and not stopped_early:
+        _save_ckpt(phase="done", step_idx=len(steps) - 1)
+
+    status = "INTERRUPTED (checkpoint saved)" if stopped_early else "Complete"
     print(f"\n{'='*60}")
-    print("Hybrid Pruning Complete")
+    print(f"Hybrid Pruning {status}")
     print(f"  Final sparsity : {final_sparsity:.2%}")
     print(f"  Final test acc : {final_test_acc:.2f}%")
     print(f"  Best phase acc : {best_phase_acc:.2f}%")

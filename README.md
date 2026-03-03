@@ -191,6 +191,39 @@ python -m src.experiments --algorithm hybrid \
 - `--iter_finetune_patience`: Early-stopping patience per iterative step (default: 10)
 - `--use_global_pruning`: Use global magnitude pruning (default: True)
 
+#### Checkpoint / Resume Support (for long sessions)
+
+Hybrid experiments support wall-clock aware checkpointing and resume.
+
+**Arguments:**
+- `--time_limit`: Wall-clock limit in seconds (e.g. `39600` for ~11 hours)
+- `--resume_from`: Path to a Hybrid checkpoint (`hybrid_checkpoint.pt`)
+- `--checkpoint_interval`: Save every N pruning phases (default: 10)
+
+**Checkpoint location:**
+```
+./results/hybrid/hybrid_{model}_{dataset}_s{target}_seed{seed}/checkpoints/
+    └── hybrid_checkpoint.pt
+```
+
+**Example: run with auto-save before timeout**
+```bash
+python -m src.experiments --algorithm hybrid --model resnet20 --dataset cifar10 \
+        --target_sparsity 0.9 --oneshot_ratio 0.7 \
+        --time_limit 39600 --checkpoint_interval 1
+```
+
+**Example: resume from saved checkpoint**
+```bash
+python -m src.experiments --algorithm hybrid --model resnet20 --dataset cifar10 \
+        --target_sparsity 0.9 --oneshot_ratio 0.7 \
+        --time_limit 39600 --checkpoint_interval 1 \
+        --resume_from ./results/hybrid/hybrid_resnet20_cifar10_s0.9_seed42/checkpoints/hybrid_checkpoint.pt
+```
+
+When resumed, Hybrid restores model state, masks, completed phase history,
+and random generator states to continue from the next pruning phase.
+
 ### 6. Common Arguments
 
 All algorithms support:

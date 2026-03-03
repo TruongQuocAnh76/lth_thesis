@@ -2871,6 +2871,13 @@ def run_experiment(
         momentum = kwargs.get('momentum', 0.9)
         weight_decay = kwargs.get('weight_decay', 5e-4)
         use_global_pruning = kwargs.get('use_global_pruning', True)
+        resume_from = kwargs.get('resume_from', None)
+        time_limit_seconds = kwargs.get('time_limit_seconds', None)
+        checkpoint_interval = kwargs.get('checkpoint_interval', 10)
+
+        # Default checkpoint directory (same pattern as other algorithms)
+        hybrid_name = f"hybrid_{model}_{dataset}_s{target_sparsity}_seed{seed}"
+        checkpoint_dir = Path("./results") / "hybrid" / hybrid_name / "checkpoints"
 
         num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
 
@@ -2893,6 +2900,10 @@ def run_experiment(
             use_global_pruning=use_global_pruning,
             seed=seed,
             device=device,
+            checkpoint_dir=str(checkpoint_dir),
+            checkpoint_interval=checkpoint_interval,
+            time_limit_seconds=time_limit_seconds,
+            resume_from=resume_from,
         )
 
     else:
@@ -3186,6 +3197,9 @@ Examples:
             kwargs['use_global_pruning'] = args.use_global_pruning
             kwargs['batch_size'] = args.batch_size if args.batch_size else 128
             kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 5e-4
+            kwargs['resume_from'] = args.resume_from
+            kwargs['time_limit_seconds'] = args.time_limit
+            kwargs['checkpoint_interval'] = args.checkpoint_interval
 
         elif args.algorithm == "genetic":
             kwargs['population_size'] = args.population_size
