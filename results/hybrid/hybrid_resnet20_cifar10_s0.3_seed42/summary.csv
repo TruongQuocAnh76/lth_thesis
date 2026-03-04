@@ -1,0 +1,4 @@
+phase,label,prune_ratio,sparsity,finetune_epochs,best_test_acc,final_test_acc
+0,one-shot,0.210000,0.210003,200,90.64,90.64
+1,iter-1,0.100000,0.289008,10,90.52,90.52
+2,iter-2,0.015471,0.300012,10,90.57,90.57
