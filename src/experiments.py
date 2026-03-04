@@ -2881,7 +2881,7 @@ def run_experiment(
 
         num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
 
-        return hybrid_pruning(
+        hybrid_results = hybrid_pruning(
             model_name=model,
             dataset_name=dataset,
             num_classes=num_classes,
@@ -2905,6 +2905,56 @@ def run_experiment(
             time_limit_seconds=time_limit_seconds,
             resume_from=resume_from,
         )
+
+        # ----- Save results in standard format ----- #
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        result_dir = Path("./results") / "hybrid" / hybrid_name / timestamp
+        result_dir.mkdir(parents=True, exist_ok=True)
+
+        # Extract model & masks before serialising (they aren't JSON-safe)
+        hybrid_model = hybrid_results.pop("model", None)
+        hybrid_masks = hybrid_results.pop("masks", None)
+
+        # results.json
+        results_ser = _convert_to_serializable(hybrid_results)
+        with open(result_dir / "results.json", "w") as f:
+            json.dump(results_ser, f, indent=2)
+
+        # summary.csv – one row per pruning phase
+        import csv
+        with open(result_dir / "summary.csv", "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "phase", "label", "prune_ratio", "sparsity",
+                "finetune_epochs", "best_test_acc", "final_test_acc",
+            ])
+            for p in hybrid_results.get("phases", []):
+                writer.writerow([
+                    p["step"],
+                    p["label"],
+                    f"{p['prune_ratio']:.6f}",
+                    f"{p['sparsity_after_prune']:.6f}",
+                    p["finetune_epochs_run"],
+                    f"{p['best_test_acc']:.2f}",
+                    f"{p['final_test_acc']:.2f}",
+                ])
+
+        # final_model.pt & masks.pt
+        if hybrid_model is not None:
+            raw = (hybrid_model.module
+                   if isinstance(hybrid_model, torch.nn.DataParallel)
+                   else hybrid_model)
+            torch.save(raw.state_dict(), result_dir / "final_model.pt")
+        if hybrid_masks is not None:
+            masks_torch = {k: torch.from_numpy(v) for k, v in hybrid_masks.items()}
+            torch.save(masks_torch, result_dir / "masks.pt")
+
+        print(f"Results saved to: {result_dir}")
+
+        # Re-attach for in-memory callers
+        hybrid_results["model"] = hybrid_model
+        hybrid_results["masks"] = hybrid_masks
+        return hybrid_results
 
     else:
         raise ValueError(f"Unknown algorithm: {algorithm}. "
