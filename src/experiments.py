@@ -1148,6 +1148,8 @@ class GraSPExperiment:
 
         # Model (Kaiming Normal init)
         model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
+        if self.device.type == 'cuda' and torch.cuda.device_count() > 1:
+            print(f"Using {torch.cuda.device_count()} T4 GPUs")
         for m in model.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -1604,6 +1606,8 @@ class GAExperiment:
 
         # Model (Kaiming init — same as other experiments)
         model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
+        if self.device.type == 'cuda' and torch.cuda.device_count() > 1:
+            print(f"Using {torch.cuda.device_count()} T4 GPUs")
         for m in model.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')

@@ -41,6 +41,24 @@ from tqdm import tqdm
 
 
 # ------------------------------------------------------------------ #
+# Parametrization: zero-copy mask application via torch.nn.utils.parametrize
+# ------------------------------------------------------------------ #
+
+class MaskParametrization(nn.Module):
+    """Applies a binary mask to a weight tensor on-the-fly (zero copy)."""
+
+    def __init__(self, mask: torch.Tensor):
+        super().__init__()
+        self.register_buffer("mask", mask)
+
+    def forward(self, weight: torch.Tensor) -> torch.Tensor:
+        return weight * self.mask
+
+    def right_inverse(self, weight: torch.Tensor) -> torch.Tensor:
+        return weight  # identity — not used for inference
+
+
+# ------------------------------------------------------------------ #
 # Utility: flatten / unflatten masks  ↔  single bit-vector
 # ------------------------------------------------------------------ #
 
@@ -113,24 +131,30 @@ def _evaluate_mask_on_data(
     """
     # Apply masks to model weights (in-place on a copy)
     model.eval()
-    # Save original weights, apply mask, evaluate, then restore
+
+    # If masks are provided, apply them the legacy way (used by post-pruning).
+    # When the caller uses torch parametrization, masks will be empty.
     original_state = {}
-    for name, module in model.named_modules():
-        if name in masks:
-            original_state[name] = module.weight.data.clone()
-            mask_t = torch.from_numpy(masks[name]).to(module.weight.device).float()
-            module.weight.data.mul_(mask_t)
+    if masks:
+        for name, module in model.named_modules():
+            if name in masks:
+                original_state[name] = module.weight.data.clone()
+                mask_t = torch.from_numpy(masks[name]).to(module.weight.device).float()
+                module.weight.data.mul_(mask_t)
 
     total_loss = 0.0
     correct = 0
     total = 0
     n_batches = 0
 
+    autocast_enabled = device.type == 'cuda'
     with torch.no_grad():
         for X, y in dataloader:
             X, y = X.to(device), y.to(device)
-            out = model(X)
-            loss = criterion(out, y)
+            with torch.autocast(device_type=device.type, dtype=torch.float16,
+                                 enabled=autocast_enabled):
+                out = model(X)
+                loss = criterion(out, y)
             total_loss += loss.item()
             preds = out.argmax(dim=1)
             correct += (preds == y).sum().item()
@@ -139,7 +163,7 @@ def _evaluate_mask_on_data(
             if max_batches is not None and n_batches >= max_batches:
                 break
 
-    # Restore original weights
+    # Restore original weights (only if we modified them)
     for name, module in model.named_modules():
         if name in original_state:
             module.weight.data.copy_(original_state[name])
@@ -461,27 +485,49 @@ class GeneticAlgorithmPruner:
     # ----- evaluation ------------------------------------------------ #
 
     def _evaluate(self, ind: Individual) -> Tuple[float, float]:
-        """Return (perf, sparsity) for an individual.
+        """Fast zero-copy evaluation using torch.nn.utils.parametrize.
 
-        *perf* is ``-loss`` when ``use_loss_fitness`` is True (so higher is
-        always better), otherwise it is accuracy.
+        Instead of cloning weights → multiplying → restoring for every
+        individual, we register a lightweight parametrization that
+        applies the mask on-the-fly during the forward pass.  This
+        avoids expensive GPU memory copies and is the main speed-up.
+
+        *perf* is ``-loss`` when ``use_loss_fitness`` is True (so higher
+        is always better), otherwise it is accuracy.
         """
         cached = self.cache.get(ind.genome)
         if cached is not None:
             return cached
 
         masks = bitvector_to_masks(ind.genome, self.mask_template)
+
+        # Register parametrization on every prunable layer (very cheap)
+        parametrized_modules: List[Tuple[nn.Module, str]] = []
+        for name, module in self.model.named_modules():
+            if name in masks and hasattr(module, 'weight'):
+                mask_t = torch.from_numpy(masks[name]).to(self.device).float()
+                torch.nn.utils.parametrize.register_parametrization(
+                    module, "weight", MaskParametrization(mask_t),
+                )
+                parametrized_modules.append((module, "weight"))
+
+        # Forward pass – the parametrization applies the mask automatically
         loss, acc = _evaluate_mask_on_data(
-            self.model, masks, self.train_loader,
-            self.criterion, self.device,
+            self.model,
+            {},  # masks already applied via parametrization
+            self.train_loader,
+            self.criterion,
+            self.device,
             max_batches=self.cfg.max_eval_batches,
         )
 
-        if self.cfg.use_loss_fitness:
-            perf = -loss  # higher is better
-        else:
-            perf = acc
+        # Remove parametrizations (restores original weight attribute)
+        for module, param_name in parametrized_modules:
+            torch.nn.utils.parametrize.remove_parametrizations(
+                module, param_name, leave_parametrized=False,
+            )
 
+        perf = -loss if self.cfg.use_loss_fitness else acc
         sparsity = _compute_sparsity(ind.genome)
         fitness = (perf, sparsity)
         self.cache.put(ind.genome, fitness)
