@@ -723,8 +723,12 @@ def hybrid_pruning(
     print("Starting Hybrid Pruning Experiment")
     print(f"Model: {model_name}, Dataset: {dataset_name}")
     print(f"Target sparsity: {target_sparsity:.1%}")
-    print(f"One-shot prune: {oneshot_ratio*target_sparsity:.1%}  "
-          f"({oneshot_ratio:.0%} of target)")
+    # `oneshot_ratio` may be None (auto). Use a safe display value
+    display_oneshot = oneshot_ratio if oneshot_ratio is not None else 0.7
+    print(
+        f"One-shot prune: {display_oneshot * target_sparsity:.1%}  "
+        f"({display_oneshot:.0%} of target)"
+    )
     print(f"Iterative step: {iterative_step:.1%} of remaining  "
           f"({len(steps)-1} iterative steps)")
     print(f"Device: {device}")
