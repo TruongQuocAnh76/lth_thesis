@@ -55,7 +55,10 @@ from src.util import (
 from src.grasp import grasp, get_grasp_sparsity
 from src.synflow import synflow_pruning, apply_synflow_masks, get_synflow_sparsity
 from src.ga import GAConfig, GeneticAlgorithmPruner
+# Optional improved hybrid algorithm wrapper (falls back to src.hybrid)
 from src.hybrid import hybrid_pruning
+# Direct import from the user-provided module `src/hybrid_improve.py`.
+from src.hybrid_improve import hybrid_pruning as hybrid_improve_pruning
 
 
 class IMPExperiment:
@@ -2909,56 +2912,47 @@ def run_experiment(
             time_limit_seconds=time_limit_seconds,
             resume_from=resume_from,
         )
-
-        # ----- Save results in standard format ----- #
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        result_dir = Path("./results") / "hybrid" / hybrid_name / timestamp
-        result_dir.mkdir(parents=True, exist_ok=True)
-
-        # Extract model & masks before serialising (they aren't JSON-safe)
-        hybrid_model = hybrid_results.pop("model", None)
-        hybrid_masks = hybrid_results.pop("masks", None)
-
-        # results.json
-        results_ser = _convert_to_serializable(hybrid_results)
-        with open(result_dir / "results.json", "w") as f:
-            json.dump(results_ser, f, indent=2)
-
-        # summary.csv – one row per pruning phase
-        import csv
-        with open(result_dir / "summary.csv", "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                "phase", "label", "prune_ratio", "sparsity",
-                "finetune_epochs", "best_test_acc", "final_test_acc",
-            ])
-            for p in hybrid_results.get("phases", []):
-                writer.writerow([
-                    p["step"],
-                    p["label"],
-                    f"{p['prune_ratio']:.6f}",
-                    f"{p['sparsity_after_prune']:.6f}",
-                    p["finetune_epochs_run"],
-                    f"{p['best_test_acc']:.2f}",
-                    f"{p['final_test_acc']:.2f}",
-                ])
-
-        # final_model.pt & masks.pt
-        if hybrid_model is not None:
-            raw = (hybrid_model.module
-                   if isinstance(hybrid_model, torch.nn.DataParallel)
-                   else hybrid_model)
-            torch.save(raw.state_dict(), result_dir / "final_model.pt")
-        if hybrid_masks is not None:
-            masks_torch = {k: torch.from_numpy(v) for k, v in hybrid_masks.items()}
-            torch.save(masks_torch, result_dir / "masks.pt")
-
-        print(f"Results saved to: {result_dir}")
-
-        # Re-attach for in-memory callers
-        hybrid_results["model"] = hybrid_model
-        hybrid_results["masks"] = hybrid_masks
         return hybrid_results
+
+    elif algorithm.lower() == "hybrid_improve":
+        # Hybrid-improve parameters (same defaults as the paper config used in the notebook)
+        target_sparsity = kwargs.get('target_sparsity', 0.8)
+        oneshot_ratio = kwargs.get('oneshot_ratio', 0.7)
+        iterative_step = kwargs.get('iterative_step', 0.02)
+        initial_epochs = kwargs.get('initial_epochs', 100)
+        initial_lr = kwargs.get('initial_lr', 0.1)
+        oneshot_finetune_max_epochs = kwargs.get('oneshot_finetune_max_epochs', 200)
+        oneshot_finetune_patience = kwargs.get('oneshot_finetune_patience', 100)
+        iter_finetune_max_epochs = kwargs.get('iter_finetune_max_epochs', 10)
+        iter_finetune_patience = kwargs.get('iter_finetune_patience', 5)
+        batch_size = kwargs.get('batch_size', 128)
+        momentum = kwargs.get('momentum', 0.9)
+        weight_decay = kwargs.get('weight_decay', 5e-4)
+        seed = kwargs.get('seed', 42)
+        device = kwargs.get('device', 'cuda')
+
+        results = hybrid_improve_pruning(
+            model_name=model,
+            dataset_name=dataset,
+            num_classes=10 if dataset.lower() in ['cifar10', 'mnist'] else 100,
+            target_sparsity=target_sparsity,
+            oneshot_ratio=oneshot_ratio,
+            iterative_step=iterative_step,
+            initial_epochs=initial_epochs,
+            initial_lr=initial_lr,
+            oneshot_finetune_max_epochs=oneshot_finetune_max_epochs,
+            oneshot_finetune_patience=oneshot_finetune_patience,
+            iter_finetune_max_epochs=iter_finetune_max_epochs,
+            iter_finetune_patience=iter_finetune_patience,
+            batch_size=batch_size,
+            momentum=momentum,
+            weight_decay=weight_decay,
+            seed=seed,
+            device=device,
+            verbose=True,
+        )
+
+        return results
 
     else:
         raise ValueError(f"Unknown algorithm: {algorithm}. "
@@ -3027,7 +3021,7 @@ Examples:
     
     # Main arguments
     parser.add_argument("--algorithm", type=str, default="imp",
-                       choices=["imp", "earlybird", "earlybird_resnet", "grasp", "synflow", "genetic", "hybrid"],
+                       choices=["imp", "earlybird", "earlybird_resnet", "grasp", "synflow", "genetic", "hybrid", "hybrid_improve"],
                        help="Pruning algorithm to use")
     parser.add_argument("--model", type=str, default="resnet20",
                        help="Model architecture (resnet20, vgg16, etc.)")

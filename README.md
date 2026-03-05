@@ -181,7 +181,9 @@ python -m src.experiments --algorithm hybrid \
 
 **Available Hybrid arguments:**
 - `--target_sparsity`: Target overall sparsity (default: 0.9)
-- `--oneshot_ratio`: Fraction of target to prune in one shot (default: 0.7, i.e. 70% of target)
+- `--oneshot_ratio`: Fraction of target to prune in one shot (optional).
+    - If omitted (`--oneshot_ratio` not provided) a conservative default (0.7) is used for building the pruning schedule.
+    - Prefer enabling `--use_fisher_adaptive_ratio` to let the implementation estimate a data-driven oneshot ratio after initial training (adaptive Fisher); when enabled the oneshot ratio will be recomputed and the schedule rebuilt.
 - `--iterative_step`: Fraction of remaining weights to prune per iterative step. Auto-selected if omitted: 10% when target < 80%, 2% when target > 80%
 - `--initial_epochs`: Dense training epochs (default: 160)
 - `--initial_lr`: Learning rate for initial training (default: 0.01). Fine-tuning uses 1/10th of this
@@ -304,6 +306,22 @@ python -m src.experiments --algorithm hybrid --model resnet20 --dataset cifar10 
 python -m src.experiments --algorithm hybrid --model resnet20 --dataset cifar100 \
     --target_sparsity 0.7 --oneshot_ratio 0.7 --iterative_step 0.10
 ```
+
+## Hybrid-Improve (improved hybrid variant)
+
+The project includes an improved hybrid implementation. Run it via the unified
+experiment runner using `--algorithm hybrid_improve`. Example quick run:
+
+```bash
+python -m src.experiments --algorithm hybrid_improve \
+    --model resnet20 --dataset cifar10 --target_sparsity 0.8 \
+    --oneshot_ratio 0.7 --initial_epochs 100 --device cuda --seed 42
+```
+
+Notes:
+- Uses the full implementation in `src/hybrid_improve_impl.py`.
+- Prefer a CUDA device; FP16 inference is enabled where applicable for speed.
+- For full experiments use the same checkpoint and resume flags as `hybrid`.
 
 ### 5. SynFlow (Synaptic Flow)
 
