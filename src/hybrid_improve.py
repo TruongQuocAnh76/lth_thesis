@@ -1089,6 +1089,11 @@ def hybrid_pruning(
         apply_fn = create_mask_apply_fn(raw_model)
 
         new_sparsity = get_overall_sparsity(masks)
+        # One-shot phase: optionally use KD teacher
+        # Iterative phase: LR warmup at transition (step_idx == 1 only)
+        ft_teacher = teacher_model if (is_oneshot and use_kd) else None
+        ft_warmup = iter_lr_rewind_warmup_epochs if (not is_oneshot and step_idx == 1) else 0
+
         print(f"  Sparsity after prune: {new_sparsity:.2%}")
         if ft_teacher is not None:
             print(f"  KD active (T={kd_temperature}, λ={kd_lambda})")
@@ -1096,10 +1101,6 @@ def hybrid_pruning(
             print(f"  LR warmup for first {ft_warmup} epochs (iterative transition)")
 
         # Fine-tune with early stopping
-        # One-shot phase: optionally use KD teacher
-        # Iterative phase: LR warmup at transition (step_idx == 1 only)
-        ft_teacher = teacher_model if (is_oneshot and use_kd) else None
-        ft_warmup = iter_lr_rewind_warmup_epochs if (not is_oneshot and step_idx == 1) else 0
 
         ft_history = _finetune(
             model=model,
