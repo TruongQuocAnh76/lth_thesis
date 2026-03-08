@@ -216,7 +216,8 @@ def train_epochs(
     scheduler: Optional[Any] = None,
     masks: Optional[Dict[str, Any]] = None,
     apply_mask_fn: Optional[Callable] = None,
-    verbose: bool = True
+    verbose: bool = True,
+    epoch_callback: Optional[Callable] = None,
 ) -> Dict[str, Any]:
     """Train for a specified number of epochs.
     
@@ -272,6 +273,10 @@ def train_epochs(
             'train_acc': f'{train_acc:.2f}%',
             'test_acc': f'{test_acc:.2f}%'
         })
+
+        # Optional per-epoch callback (e.g. torch.profiler step)
+        if epoch_callback is not None:
+            epoch_callback()
     
     return {
         'train_losses': train_losses,

@@ -20,13 +20,18 @@ Reference implementation: ``pruning-benchmark/`` ``HybridStepScheduler``.
 
 import copy
 import math
+import os
 import time as _time
 from pathlib import Path
 
 import numpy as np
 import torch
+import torch.distributed as dist
+import torch.multiprocessing as mp
 import torch.nn as nn
+import torch.nn.parallel
 import torch.optim as optim
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from typing import Dict, List, Any, Optional, Callable, Tuple
 from tqdm import tqdm
@@ -269,6 +274,8 @@ def _finetune(
     kd_lambda: float = 0.5,
     # --- LR warmup (iterative transition) ---------------------------------
     lr_warmup_epochs: int = 0,
+    # --- CUDA Graphs (reduces kernel-launch overhead) ---------------------
+    use_cuda_graphs: bool = False,
 ) -> Dict[str, Any]:
     """Fine-tune a pruned model with early stopping.
 
@@ -322,6 +329,46 @@ def _finetune(
         for p in teacher_model.parameters():
             p.requires_grad_(False)
 
+    # --- CUDA Graphs setup -----------------------------------------------
+    # CUDA Graphs capture a sequence of CUDA kernels and replay them with
+    # reduced host-side overhead (~10-30% speedup for short epochs on CUDA).
+    # Only usable when: CUDA is available, no KD teacher (dynamic control
+    # flow in the hook prevents capturing), warmup disabled, and the caller
+    # opts in via `use_cuda_graphs=True`.
+    _use_graphs = (
+        use_cuda_graphs
+        and torch.cuda.is_available()
+        and teacher_model is None
+        and lr_warmup_epochs == 0
+        and scaler is None  # AMP and graphs need extra care; skip for safety
+    )
+    _graph: Optional[torch.cuda.CUDAGraph] = None
+    _static_data: Optional[torch.Tensor] = None
+    _static_target: Optional[torch.Tensor] = None
+    _static_loss: Optional[torch.Tensor] = None
+
+    if _use_graphs:
+        # Warm up the graph with a few iterations before capturing
+        _sample_data, _sample_target = next(iter(train_loader))
+        _static_data = _sample_data.to(device)
+        _static_target = _sample_target.to(device)
+        # Warmup runs (required before CUDA graph capture)
+        for _ in range(3):
+            optimizer.zero_grad(set_to_none=True)
+            _out = model(_static_data)
+            _loss = criterion(_out, _static_target)
+            _loss.backward()
+            optimizer.step()
+        # Capture the graph
+        _graph = torch.cuda.CUDAGraph()
+        optimizer.zero_grad(set_to_none=True)
+        with torch.cuda.graph(_graph):
+            _static_out = model(_static_data)
+            _static_loss = criterion(_static_out, _static_target)
+            _static_loss.backward()
+        # Zero grad again after capture so first real step starts clean
+        optimizer.zero_grad(set_to_none=True)
+
     history: Dict[str, List] = {
         "train_losses": [],
         "train_accs": [],
@@ -373,11 +420,34 @@ def _finetune(
             effective_criterion = criterion
             _hook = None
 
-        train_loss, train_acc = train_epoch(
-            model, train_loader, effective_criterion, optimizer, device,
-            masks=masks, apply_mask_fn=apply_mask_fn,
-            scaler=scaler,
-        )
+        if _use_graphs and _graph is not None:
+            # CUDA-Graph replay path: copy data into static buffers, replay,
+            # then step the optimizer (optimizer.step() is outside the graph).
+            total_loss_graph = 0.0
+            correct_graph = 0
+            total_graph = 0
+            for _data, _tgt in train_loader:
+                _static_data.copy_(_data.to(device))
+                _static_target.copy_(_tgt.to(device))
+                _graph.replay()
+                optimizer.step()
+                if masks is not None:
+                    apply_mask_fn(masks)
+                total_loss_graph += _static_loss.item()
+                # accuracy from static output
+                with torch.no_grad():
+                    _pred = _static_out.argmax(dim=1)
+                    correct_graph += _pred.eq(_static_target).sum().item()
+                    total_graph += _static_target.size(0)
+                optimizer.zero_grad(set_to_none=True)
+            train_loss = total_loss_graph / max(len(train_loader), 1)
+            train_acc = 100.0 * correct_graph / max(total_graph, 1)
+        else:
+            train_loss, train_acc = train_epoch(
+                model, train_loader, effective_criterion, optimizer, device,
+                masks=masks, apply_mask_fn=apply_mask_fn,
+                scaler=scaler,
+            )
 
         if _hook is not None:
             _hook.remove()
@@ -548,6 +618,12 @@ def hybrid_pruning(
     checkpoint_interval: int = 1,
     time_limit_seconds: Optional[float] = None,
     resume_from: Optional[str] = None,
+    # -- Performance optimizations ----------------------------------------
+    use_compile: bool = False,
+    use_ddp: bool = False,
+    use_cuda_graphs: bool = False,
+    profile_initial_training: bool = False,
+    profile_output_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run the complete hybrid pruning experiment.
 
@@ -752,10 +828,51 @@ def hybrid_pruning(
 
     # Model
     model = get_model(model_name, num_classes=num_classes).to(device)
+
+    # --- torch.compile (PyTorch ≥ 2.0) -----------------------------------
+    # Fuses operators for up to 1.5× throughput improvement.  Must be
+    # applied *before* DDP wrapping so the compiled graph is distributed.
+    if use_compile:
+        if hasattr(torch, "compile"):
+            print("  torch.compile() enabled — compiling model…")
+            model = torch.compile(model)
+        else:
+            print("  WARNING: use_compile=True but torch.compile not available "
+                  "(requires PyTorch ≥ 2.0). Skipping.")
+
+    # --- Multi-GPU: DDP (preferred) or DataParallel (fallback) -----------
     if torch.cuda.device_count() > 1:
-        print(f"Using {torch.cuda.device_count()} GPUs!")
-        model = torch.nn.DataParallel(model)
-    raw_model = model.module if isinstance(model, torch.nn.DataParallel) else model
+        if use_ddp:
+            # DDP requires torch.distributed to be initialised by the caller
+            # (e.g. via `torchrun` or `torch.multiprocessing.spawn`).
+            # We initialise a default process group here as a convenience
+            # when running in a plain `python` process with just env-vars set.
+            if not dist.is_initialized():
+                backend = "nccl" if torch.cuda.is_available() else "gloo"
+                dist.init_process_group(backend=backend)
+            local_rank = int(os.environ.get("LOCAL_RANK", 0))
+            torch.cuda.set_device(local_rank)
+            device = torch.device(f"cuda:{local_rank}")
+            model = model.to(device)
+            model = DDP(model, device_ids=[local_rank],
+                        output_device=local_rank)
+            print(f"  DDP enabled on {torch.cuda.device_count()} GPUs "
+                  f"(local_rank={local_rank}).")
+        else:
+            print(f"  DataParallel enabled on {torch.cuda.device_count()} GPUs. "
+                  "Consider use_ddp=True for 20-50% higher throughput.")
+            model = torch.nn.DataParallel(model)
+
+    raw_model = (
+        model.module
+        if isinstance(model, (torch.nn.DataParallel, DDP))
+        else model
+    )
+    # Unwrap torch.compile's wrapper to get the original nn.Module when
+    # needed for weight access / mask application.
+    if hasattr(raw_model, "_orig_mod"):
+        raw_model = raw_model._orig_mod
+
     param_info = count_parameters(model)
     print(f"Model parameters: {param_info['total']:,}")
 
@@ -813,6 +930,36 @@ def hybrid_pruning(
 
         from src.train import train_epochs
 
+        # --- torch.profiler (optional) -----------------------------------
+        # Wraps initial training to export a Chrome-trace JSON that reveals
+        # bottlenecks (slow data loading, pruning sort, kernel overhead …).
+        _prof_dir = profile_output_dir or checkpoint_dir or "."
+        _should_profile = profile_initial_training and torch.cuda.is_available()
+        if _should_profile:
+            Path(_prof_dir).mkdir(parents=True, exist_ok=True)
+            _prof = torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
+                schedule=torch.profiler.schedule(
+                    wait=1, warmup=1, active=3, repeat=1
+                ),
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                    str(_prof_dir)
+                ),
+                record_shapes=True,
+                with_stack=False,
+            )
+            _prof.start()
+            print(f"  Profiler active — traces will be saved to {_prof_dir}")
+        else:
+            _prof = None
+
+        def _prof_step():
+            if _prof is not None:
+                _prof.step()
+
         init_history = train_epochs(
             model=model,
             train_loader=train_loader,
@@ -823,7 +970,13 @@ def hybrid_pruning(
             device=device,
             scheduler=lr_scheduler,
             verbose=verbose,
+            epoch_callback=_prof_step,
         )
+
+        if _prof is not None:
+            _prof.stop()
+            print(f"  Profiler stopped. Open {_prof_dir} in TensorBoard.")
+
         init_test_acc = init_history["final_test_acc"]
         results["initial_training"] = {
             "train_losses": init_history["train_losses"],
@@ -968,6 +1121,7 @@ def hybrid_pruning(
             kd_temperature=kd_temperature,
             kd_lambda=kd_lambda,
             lr_warmup_epochs=ft_warmup,
+            use_cuda_graphs=use_cuda_graphs,
         )
 
         _, phase_test_acc = evaluate(model, test_loader, criterion, device)

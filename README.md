@@ -193,6 +193,31 @@ python -m src.experiments --algorithm hybrid \
 - `--iter_finetune_patience`: Early-stopping patience per iterative step (default: 10)
 - `--use_global_pruning`: Use global magnitude pruning (default: True)
 
+**Performance Optimizations (Hybrid only):**
+
+The Hybrid implementation includes several opt-in performance features for faster training and profiling:
+
+- `--use_compile`: Apply `torch.compile()` to the model (PyTorch ≥ 2.0). Fuses operators for up to **1.5× throughput** improvement. Disabled by default due to first-epoch compilation overhead.
+
+- `--use_ddp`: Wrap model in `DistributedDataParallel` instead of `DataParallel` when multiple GPUs are available. Avoids Python GIL contention and is **20–50% faster** than DataParallel. Requires `torch.distributed` to be initialized (set `MASTER_ADDR`, `MASTER_PORT`, `RANK`, `WORLD_SIZE` env vars, or use `torchrun`).
+
+- `--use_cuda_graphs`: Capture fine-tuning training loops with CUDA Graphs to reduce kernel-launch overhead (~**10–30% speedup** for short epochs on CUDA). Only effective when there is no KD teacher and AMP is disabled. Silently falls back to the normal loop otherwise.
+
+- `--profile_initial_training`: Enable `torch.profiler` for the initial training phase. Exports a Chrome-trace JSON to TensorBoard format for bottleneck analysis (slow data loading, pruning sort, kernel overhead). Only runs when CUDA is available.
+
+- `--profile_output_dir`: Directory for profiler trace files (default: same as `checkpoint_dir`).
+
+**Example: Enable all optimizations**
+```bash
+python -m src.experiments --algorithm hybrid \
+    --model resnet20 --dataset cifar10 \
+    --target_sparsity 0.9 \
+    --use_compile --use_ddp --use_cuda_graphs \
+    --profile_initial_training --profile_output_dir ./profiler_traces
+```
+
+**Note:** `pin_memory=True` is already enabled in the data loaders for 10–20% faster CPU→GPU transfers.
+
 #### Checkpoint / Resume Support (for long sessions)
 
 Hybrid experiments support wall-clock aware checkpointing and resume.
@@ -374,6 +399,31 @@ python -m src.experiments --algorithm hybrid \
 - `--iter_finetune_max_epochs`: Max epochs per iterative fine-tuning step (default: 10)
 - `--iter_finetune_patience`: Early-stopping patience per iterative step (default: 10)
 - `--use_global_pruning`: Use global magnitude pruning (default: True)
+
+**Performance Optimizations (Hybrid only):**
+
+The Hybrid implementation includes several opt-in performance features for faster training and profiling:
+
+- `--use_compile`: Apply `torch.compile()` to the model (PyTorch ≥ 2.0). Fuses operators for up to **1.5× throughput** improvement. Disabled by default due to first-epoch compilation overhead.
+
+- `--use_ddp`: Wrap model in `DistributedDataParallel` instead of `DataParallel` when multiple GPUs are available. Avoids Python GIL contention and is **20–50% faster** than DataParallel. Requires `torch.distributed` to be initialized (set `MASTER_ADDR`, `MASTER_PORT`, `RANK`, `WORLD_SIZE` env vars, or use `torchrun`).
+
+- `--use_cuda_graphs`: Capture fine-tuning training loops with CUDA Graphs to reduce kernel-launch overhead (~**10–30% speedup** for short epochs on CUDA). Only effective when there is no KD teacher and AMP is disabled. Silently falls back to the normal loop otherwise.
+
+- `--profile_initial_training`: Enable `torch.profiler` for the initial training phase. Exports a Chrome-trace JSON to TensorBoard format for bottleneck analysis (slow data loading, pruning sort, kernel overhead). Only runs when CUDA is available.
+
+- `--profile_output_dir`: Directory for profiler trace files (default: same as `checkpoint_dir`).
+
+**Example: Enable all optimizations**
+```bash
+python -m src.experiments --algorithm hybrid \
+    --model resnet20 --dataset cifar10 \
+    --target_sparsity 0.9 \
+    --use_compile --use_ddp --use_cuda_graphs \
+    --profile_initial_training --profile_output_dir ./profiler_traces
+```
+
+**Note:** `pin_memory=True` is already enabled in the data loaders for 10–20% faster CPU→GPU transfers.
 
 ### 7. Common Arguments
 
