@@ -18,6 +18,7 @@ def train_epoch(
     masks: Optional[Dict[str, Any]] = None,
     apply_mask_fn: Optional[Callable] = None,
     scaler: Optional[GradScaler] = None,
+    use_amp: bool = False,
 ) -> tuple:
     """Train model for one epoch.
     
@@ -32,6 +33,8 @@ def train_epoch(
         scaler: Optional GradScaler for mixed-precision (AMP) training.
             When provided, forward passes run under ``autocast`` and
             gradients are scaled automatically.
+        use_amp: Enable ``autocast`` context for the forward/loss pass.
+            Should be ``True`` whenever ``scaler`` is not ``None``.
     
     Returns:
         Tuple of (average_loss, accuracy_percentage)
@@ -44,18 +47,19 @@ def train_epoch(
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
 
         if scaler is not None:
-            with autocast():
+            with autocast(enabled=use_amp):
                 output = model(data)
                 loss = criterion(output, target)
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
         else:
-            output = model(data)
-            loss = criterion(output, target)
+            with autocast(enabled=use_amp):
+                output = model(data)
+                loss = criterion(output, target)
             loss.backward()
             optimizer.step()
         
@@ -96,11 +100,13 @@ def evaluate(
     correct = 0
     total = 0
     
+    _eval_amp = torch.cuda.is_available()
     with torch.no_grad():
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
-            output = model(data)
-            test_loss += criterion(output, target).item()
+            with autocast(enabled=_eval_amp):
+                output = model(data)
+                test_loss += criterion(output, target).item()
             pred = output.argmax(dim=1, keepdim=True)
             correct += pred.eq(target.view_as(pred)).sum().item()
             total += target.size(0)
@@ -218,6 +224,8 @@ def train_epochs(
     apply_mask_fn: Optional[Callable] = None,
     verbose: bool = True,
     epoch_callback: Optional[Callable] = None,
+    scaler: Optional[GradScaler] = None,
+    use_amp: bool = False,
 ) -> Dict[str, Any]:
     """Train for a specified number of epochs.
     
@@ -252,7 +260,9 @@ def train_epochs(
     for epoch in pbar:
         # Train
         train_loss, train_acc = train_epoch(
-            model, train_loader, criterion, optimizer, device, masks, apply_mask_fn
+            model, train_loader, criterion, optimizer, device, masks, apply_mask_fn,
+            scaler=scaler,
+            use_amp=use_amp,
         )
         
         # Evaluate

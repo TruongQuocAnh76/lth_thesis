@@ -223,8 +223,9 @@ def _compute_fisher_trace(
     model.eval()
     criterion = nn.CrossEntropyLoss()
     total_sq_norm = 0.0
-    total_params = 0
     batches_seen = 0
+    # Count parameters once — the model topology doesn't change between batches
+    total_params = sum(p.numel() for p in model.parameters())
 
     for inputs, targets in data_loader:
         if batches_seen >= num_batches:
@@ -236,10 +237,12 @@ def _compute_fisher_trace(
         loss = criterion(outputs, targets)
         loss.backward()
 
-        for p in model.parameters():
-            if p.grad is not None:
-                total_sq_norm += p.grad.detach().pow(2).sum().item()
-                total_params += p.numel()
+        # Accumulate squared norms on GPU, sync once per batch (not per param)
+        batch_sq_norm = sum(
+            p.grad.detach().pow(2).sum()
+            for p in model.parameters() if p.grad is not None
+        )
+        total_sq_norm += batch_sq_norm.item()
 
         batches_seen += 1
 
@@ -321,7 +324,11 @@ def _finetune(
         else None
     )
     stopper = EarlyStopper(patience=patience, mode="max")
-    scaler = GradScaler() if torch.cuda.is_available() else None
+    # AMP and CUDA Graphs are mutually exclusive: graphs cannot be captured
+    # while inside an autocast context. Prioritise AMP unless the caller
+    # explicitly requested graphs (which already disable AMP in the guard below).
+    use_amp = torch.cuda.is_available() and not use_cuda_graphs
+    scaler = GradScaler() if use_amp else None
 
     # Put teacher in eval mode once; it stays frozen throughout fine-tuning
     if teacher_model is not None:
@@ -340,7 +347,7 @@ def _finetune(
         and torch.cuda.is_available()
         and teacher_model is None
         and lr_warmup_epochs == 0
-        and scaler is None  # AMP and graphs need extra care; skip for safety
+        and not use_amp  # AMP and CUDA Graphs are mutually exclusive
     )
     _graph: Optional[torch.cuda.CUDAGraph] = None
     _static_data: Optional[torch.Tensor] = None
@@ -378,6 +385,32 @@ def _finetune(
     best_test_acc = 0.0
     best_state = None
 
+    # ---- Build effective criterion and register KD hook ONCE (outside loop) ----
+    # Re-creating the hook and the closure every epoch wastes memory and time.
+    if teacher_model is not None:
+        T = kd_temperature
+        lam = kd_lambda
+        _kd_extra = [torch.tensor(0.0, device=device)]
+
+        def _capture_kd(module, inp, out):
+            """Forward hook: runs teacher on the same input batch, stores KD loss."""
+            with torch.no_grad():
+                teacher_out = teacher_model(inp[0])
+            soft_s = F.log_softmax(out / T, dim=1)
+            soft_t = F.softmax(teacher_out / T, dim=1)
+            _kd_extra[0] = (
+                lam
+                * F.kl_div(soft_s, soft_t, reduction="batchmean")
+                * (T ** 2)
+            )
+
+        _hook = model.register_forward_hook(_capture_kd)
+        # Use a simple lambda so no new class is allocated per epoch
+        effective_criterion = lambda logits, tgt: (1 - lam) * criterion(logits, tgt) + _kd_extra[0]  # noqa: E731
+    else:
+        effective_criterion = criterion
+        _hook = None
+
     pbar = tqdm(range(max_epochs), desc=desc, disable=not verbose)
     for epoch in pbar:
         # ---- LR warmup: linearly ramp from lr/10 → lr over warmup epochs ----
@@ -385,40 +418,6 @@ def _finetune(
             warmup_scale = (epoch + 1) / lr_warmup_epochs
             for pg in optimizer.param_groups:
                 pg["lr"] = lr * warmup_scale
-
-        # ---- build the effective criterion for this epoch ------------------
-        # When a teacher is present we blend task loss with KD loss by
-        # (1) capturing the student's input via a forward hook so we can
-        # run the same batch through the frozen teacher, then (2) wrapping
-        # the criterion so train_epoch's interface is unchanged.
-        if teacher_model is not None:
-            T = kd_temperature
-            lam = kd_lambda
-            _kd_extra = [torch.tensor(0.0, device=device)]
-
-            def _capture_kd(module, inp, out):
-                """Forward hook: runs teacher on the same input, stores KD loss."""
-                with torch.no_grad():
-                    teacher_out = teacher_model(inp[0])
-                soft_s = F.log_softmax(out / T, dim=1)
-                soft_t = F.softmax(teacher_out / T, dim=1)
-                _kd_extra[0] = (
-                    lam
-                    * F.kl_div(soft_s, soft_t, reduction="batchmean")
-                    * (T ** 2)
-                )
-
-            _hook = model.register_forward_hook(_capture_kd)
-
-            class _BlendedLoss(nn.Module):
-                """Task loss weighted by (1-λ) plus KD loss weighted by λ."""
-                def forward(self_, logits, targets):  # noqa: N805
-                    return (1 - lam) * criterion(logits, targets) + _kd_extra[0]
-
-            effective_criterion = _BlendedLoss()
-        else:
-            effective_criterion = criterion
-            _hook = None
 
         if _use_graphs and _graph is not None:
             # CUDA-Graph replay path: copy data into static buffers, replay,
@@ -447,10 +446,9 @@ def _finetune(
                 model, train_loader, effective_criterion, optimizer, device,
                 masks=masks, apply_mask_fn=apply_mask_fn,
                 scaler=scaler,
+                use_amp=use_amp,
             )
 
-        if _hook is not None:
-            _hook.remove()
         test_loss, test_acc = evaluate(model, test_loader, criterion, device)
 
         # ---- cosine scheduler only kicks in after warmup --------------------
@@ -464,7 +462,9 @@ def _finetune(
 
         if test_acc > best_test_acc:
             best_test_acc = test_acc
-            best_state = copy.deepcopy(model.state_dict())
+            # Shallow-clone each tensor: cheaper than deepcopy but safe against
+            # in-place SGD updates (with weight decay) corrupting the snapshot.
+            best_state = {k: v.clone() for k, v in model.state_dict().items()}
 
         pbar.set_postfix(
             train_loss=f"{train_loss:.4f}",
@@ -476,6 +476,10 @@ def _finetune(
         if stopper.step(test_acc):
             pbar.set_description(f"{desc} (early-stop @ {epoch+1})")
             break
+
+    # Remove KD hook after the loop
+    if _hook is not None:
+        _hook.remove()
 
     # Restore best model
     if best_state is not None:
@@ -821,8 +825,19 @@ def hybrid_pruning(
     start_step_idx = 0  # which pruning step to start from
     set_seed(seed)
 
-    # Data
-    loaders = get_dataloaders(dataset_name, batch_size=batch_size, num_workers=4)
+    # cudnn.benchmark: fastest cuDNN auto-tuner for fixed-size (32×32) CIFAR inputs
+    if torch.cuda.is_available():
+        torch.backends.cudnn.benchmark = True
+
+    # Data — pin_memory for fast CPU→GPU DMA; persistent_workers avoids
+    # re-spawning worker processes between epochs (big win on Kaggle/Colab)
+    loaders = get_dataloaders(
+        dataset_name,
+        batch_size=batch_size,
+        num_workers=4,
+        pin_memory=True,          # faster H2D transfers
+        persistent_workers=True,  # no worker respawn between epochs
+    )
     train_loader = loaders["train"]
     test_loader = loaders["test"]
 
@@ -960,6 +975,10 @@ def hybrid_pruning(
             if _prof is not None:
                 _prof.step()
 
+        # AMP for the initial dense phase (same Tensor Core speedup as fine-tuning)
+        _use_amp_initial = torch.cuda.is_available()
+        _scaler_initial = GradScaler() if _use_amp_initial else None
+
         init_history = train_epochs(
             model=model,
             train_loader=train_loader,
@@ -971,6 +990,8 @@ def hybrid_pruning(
             scheduler=lr_scheduler,
             verbose=verbose,
             epoch_callback=_prof_step,
+            scaler=_scaler_initial,
+            use_amp=_use_amp_initial,
         )
 
         if _prof is not None:
@@ -991,9 +1012,12 @@ def hybrid_pruning(
         # Kept on CPU to avoid holding a second full model on the GPU.
         teacher_model: Optional[nn.Module] = None
         if use_kd:
-            teacher_model = copy.deepcopy(raw_model).cpu()
+            # Keep teacher on same device as student — passing a CUDA tensor
+            # to a CPU model would raise RuntimeError. For ResNet20, the memory
+            # overhead of a second copy is negligible.
+            teacher_model = copy.deepcopy(raw_model).to(device)
             teacher_model.eval()
-            print("  KD teacher snapshot saved (CPU).")
+            print(f"  KD teacher snapshot saved ({device}).")
 
         # --- Adaptive oneshot_ratio via Fisher Information Trace ----------
         if use_fisher_adaptive_ratio:

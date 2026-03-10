@@ -40,7 +40,15 @@ def get_dataset(dataset_name, train=True, download=True, data_dir='./data'):
 
     return dataset_class(root=data_dir, train=train, download=download, transform=transform)
 
-def get_dataloaders(dataset_name, batch_size=128, num_workers=4, val_split=0.1, data_dir='./data'):
+def get_dataloaders(
+    dataset_name,
+    batch_size=128,
+    num_workers=4,
+    val_split=0.1,
+    data_dir='./data',
+    pin_memory: bool = True,
+    persistent_workers: bool = False,
+):
     """
     Get train, validation, and test data loaders for CIFAR datasets.
 
@@ -50,10 +58,17 @@ def get_dataloaders(dataset_name, batch_size=128, num_workers=4, val_split=0.1, 
         num_workers (int): Number of workers for data loading
         val_split (float): Fraction of training data to use for validation
         data_dir (str): Directory to store the dataset
+        pin_memory (bool): Enable pinned (page-locked) memory for faster
+            CPU→GPU transfers when using CUDA.
+        persistent_workers (bool): Keep workers alive between epochs to avoid
+            re-spawn overhead (requires num_workers > 0).
 
     Returns:
         dict: {'train': train_loader, 'val': val_loader, 'test': test_loader}
     """
+    # persistent_workers requires at least one worker process
+    _persistent = persistent_workers and num_workers > 0
+
     # Get full training dataset
     train_dataset = get_dataset(dataset_name, train=True, data_dir=data_dir)
 
@@ -67,12 +82,21 @@ def get_dataloaders(dataset_name, batch_size=128, num_workers=4, val_split=0.1, 
     test_dataset = get_dataset(dataset_name, train=False, data_dir=data_dir)
 
     # Create data loaders
-    train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True,
-                              num_workers=num_workers, pin_memory=True)
-    val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False,
-                            num_workers=num_workers, pin_memory=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
-                             num_workers=num_workers, pin_memory=True)
+    train_loader = DataLoader(
+        train_subset, batch_size=batch_size, shuffle=True,
+        num_workers=num_workers, pin_memory=pin_memory,
+        persistent_workers=_persistent,
+    )
+    val_loader = DataLoader(
+        val_subset, batch_size=batch_size, shuffle=False,
+        num_workers=num_workers, pin_memory=pin_memory,
+        persistent_workers=_persistent,
+    )
+    test_loader = DataLoader(
+        test_dataset, batch_size=batch_size, shuffle=False,
+        num_workers=num_workers, pin_memory=pin_memory,
+        persistent_workers=_persistent,
+    )
 
     return {
         'train': train_loader,
