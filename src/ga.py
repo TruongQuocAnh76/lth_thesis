@@ -25,8 +25,6 @@ Reference hyper-parameters (from the SLTN-GA paper):
 
 from __future__ import annotations
 
-import copy
-import hashlib
 import os
 import pickle
 import time
@@ -39,23 +37,49 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 
+try:
+    import xxhash as _xxhash
+    def _genome_key(genome: np.ndarray) -> int:
+        """Fast genome hash using xxhash (~10× faster than MD5 for large arrays)."""
+        return _xxhash.xxh64(genome.tobytes()).intdigest()
+except ImportError:
+    _xxhash = None  # type: ignore
+    def _genome_key(genome: np.ndarray) -> bytes:  # type: ignore[misc]
+        """Fallback: use raw bytes as dict key (avoids hashing overhead entirely)."""
+        return genome.tobytes()
+
 
 # ------------------------------------------------------------------ #
-# Parametrization: zero-copy mask application via torch.nn.utils.parametrize
+# GA dataloader helper
 # ------------------------------------------------------------------ #
 
-class MaskParametrization(nn.Module):
-    """Applies a binary mask to a weight tensor on-the-fly (zero copy)."""
+def make_ga_dataloader(
+    dataset: torch.utils.data.Dataset,
+    batch_size: int = 512,
+    num_workers: int = 2,
+    pin_memory: bool = True,
+) -> torch.utils.data.DataLoader:
+    """Create a large-batch DataLoader optimised for GA fitness evaluation.
 
-    def __init__(self, mask: torch.Tensor):
-        super().__init__()
-        self.register_buffer("mask", mask)
+    Using a larger batch size (512+) amortises kernel-launch overhead so
+    that ``max_eval_batches=4`` covers ~2 048 samples with only 4 GPU
+    dispatches — much more efficient than the training loader
+    (typically batch_size=128).
 
-    def forward(self, weight: torch.Tensor) -> torch.Tensor:
-        return weight * self.mask
+    Example::
 
-    def right_inverse(self, weight: torch.Tensor) -> torch.Tensor:
-        return weight  # identity — not used for inference
+        ga_loader = make_ga_dataloader(train_dataset, batch_size=512)
+        pruner = GeneticAlgorithmPruner(model, ga_loader, device, config=cfg)
+    """
+    return torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=(num_workers > 0),
+        drop_last=False,
+    )
 
 
 # ------------------------------------------------------------------ #
@@ -97,8 +121,8 @@ class FitnessCache:
         self.hits = 0
         self.misses = 0
 
-    def _key(self, genome: np.ndarray) -> bytes:
-        return hashlib.md5(genome.tobytes()).digest()
+    def _key(self, genome: np.ndarray):
+        return _genome_key(genome)
 
     def get(self, genome: np.ndarray) -> Optional[Tuple[float, float]]:
         k = self._key(genome)
@@ -236,6 +260,29 @@ def mutate_single_bit(genome: np.ndarray) -> np.ndarray:
     return child
 
 
+def mutate_flip_prob(genome: np.ndarray, p: Optional[float] = None) -> np.ndarray:
+    """Flip each bit independently with probability *p* (default: ``k/n``).
+
+    With ``p = k / len(genome)`` exactly *k* bits are flipped **on average**,
+    which explores the search space orders-of-magnitude faster than
+    :func:`mutate_single_bit` for the large genomes typical of ResNet20
+    on CIFAR (~270 k parameters).  ``k = 5`` is a good default.
+
+    Args:
+        genome: Binary uint8 vector to mutate.
+        p: Per-bit flip probability.  Defaults to ``5 / len(genome)``.
+
+    Returns:
+        Mutated copy of *genome*.
+    """
+    if p is None:
+        p = 5.0 / len(genome)
+    child = genome.copy()
+    flip_mask = np.random.random(len(genome)) < p
+    child[flip_mask] ^= 1
+    return child
+
+
 # ------------------------------------------------------------------ #
 # Lexicographic fitness comparison
 # ------------------------------------------------------------------ #
@@ -266,7 +313,7 @@ class GAConfig:
     initial_ab_threshold: float = 0.7
     ab_decay_rate: float = 0.95
     use_loss_fitness: bool = True   # True → minimise loss; False → maximise accuracy
-    max_eval_batches: Optional[int] = None  # limit batches per evaluation for speed
+    max_eval_batches: int = 4  # limit batches per evaluation for speed (4 × 512 ≈ 2048 samples)
     post_prune: bool = True         # run post-evolutionary pruning
     # Checkpoint / resume support (Kaggle 12-hour sessions)
     time_limit_seconds: Optional[float] = None  # auto-save before this wall-time
@@ -305,6 +352,31 @@ class GeneticAlgorithmPruner:
             name: np.ones_like(w) for name, w in get_prunable_layers(model).items()
         }
         self.genome_length = sum(m.size for m in self.mask_template.values())
+
+        # ---- Pre-computed data structures for fast evaluation ----
+        # Store module references once so _evaluate never calls named_modules()
+        self._prunable_modules: Dict[str, nn.Module] = {
+            name: m
+            for name, m in model.named_modules()
+            if name in self.mask_template and hasattr(m, 'weight')
+        }
+        # Clone original weights to GPU once (restored after each eval)
+        self._orig_weights: Dict[str, torch.Tensor] = {
+            name: m.weight.data.clone().to(device)
+            for name, m in self._prunable_modules.items()
+        }
+        # Pre-allocate mask tensors on GPU — reused every eval, no malloc
+        self._gpu_masks: Dict[str, torch.Tensor] = {
+            name: torch.ones_like(m.weight, device=device)
+            for name, m in self._prunable_modules.items()
+        }
+        # Sorted layer names (must be consistent with bitvector_to_masks)
+        self._sorted_names: List[str] = sorted(self.mask_template.keys())
+        # Pre-allocated float32 numpy buffers — avoids astype() alloc per layer per eval
+        self._np_mask_buf: Dict[str, np.ndarray] = {
+            name: np.empty(tmpl.shape, dtype=np.float32)
+            for name, tmpl in self.mask_template.items()
+        }
 
         # History tracking
         self.generation_stats: List[Dict[str, Any]] = []
@@ -485,12 +557,21 @@ class GeneticAlgorithmPruner:
     # ----- evaluation ------------------------------------------------ #
 
     def _evaluate(self, ind: Individual) -> Tuple[float, float]:
-        """Fast zero-copy evaluation using torch.nn.utils.parametrize.
+        """Fast evaluation using pre-allocated GPU mask tensors.
 
-        Instead of cloning weights → multiplying → restoring for every
-        individual, we register a lightweight parametrization that
-        applies the mask on-the-fly during the forward pass.  This
-        avoids expensive GPU memory copies and is the main speed-up.
+        Instead of registering/removing ``torch.nn.utils.parametrize``
+        parametrizations for every individual (which has significant
+        Python + CUDA overhead), we:
+
+        1. Copy genome slices into pre-allocated GPU mask tensors
+           (``_gpu_masks``) with ``non_blocking=True`` — no new
+           allocations per call.
+        2. Compute ``orig_weight * mask → weight.data`` via
+           ``torch.mul(..., out=weight.data)`` — a single in-place
+           kernel per layer.
+        3. Run the forward pass under ``no_grad`` + ``autocast``.
+        4. Restore original weights from ``_orig_weights`` with
+           another in-place copy.
 
         *perf* is ``-loss`` when ``use_loss_fitness`` is True (so higher
         is always better), otherwise it is accuracy.
@@ -499,33 +580,43 @@ class GeneticAlgorithmPruner:
         if cached is not None:
             return cached
 
-        masks = bitvector_to_masks(ind.genome, self.mask_template)
+        # --- Fill pre-allocated GPU mask tensors from genome ---
+        # np.copyto with casting='unsafe' converts uint8→float32 in-place into
+        # the pre-allocated buffer — no new numpy allocation per layer.
+        offset = 0
+        for name in self._sorted_names:
+            size = self.mask_template[name].size
+            shape = self.mask_template[name].shape
+            np.copyto(
+                self._np_mask_buf[name],
+                ind.genome[offset:offset + size].reshape(shape),
+                casting='unsafe',
+            )
+            self._gpu_masks[name].copy_(
+                torch.from_numpy(self._np_mask_buf[name]), non_blocking=True
+            )
+            offset += size
 
-        # Register parametrization on every prunable layer (very cheap)
-        parametrized_modules: List[Tuple[nn.Module, str]] = []
-        for name, module in self.model.named_modules():
-            if name in masks and hasattr(module, 'weight'):
-                mask_t = torch.from_numpy(masks[name]).to(self.device).float()
-                torch.nn.utils.parametrize.register_parametrization(
-                    module, "weight", MaskParametrization(mask_t),
-                )
-                parametrized_modules.append((module, "weight"))
+        # --- Apply masks: orig_weight * mask → weight.data (no clone) ---
+        for name, module in self._prunable_modules.items():
+            torch.mul(
+                self._orig_weights[name],
+                self._gpu_masks[name],
+                out=module.weight.data,
+            )
 
-        # Forward pass – the parametrization applies the mask automatically
         loss, acc = _evaluate_mask_on_data(
             self.model,
-            {},  # masks already applied via parametrization
+            {},  # masks applied directly above
             self.train_loader,
             self.criterion,
             self.device,
             max_batches=self.cfg.max_eval_batches,
         )
 
-        # Remove parametrizations (restores original weight attribute)
-        for module, param_name in parametrized_modules:
-            torch.nn.utils.parametrize.remove_parametrizations(
-                module, param_name, leave_parametrized=False,
-            )
+        # --- Restore original weights ---
+        for name, module in self._prunable_modules.items():
+            module.weight.data.copy_(self._orig_weights[name], non_blocking=True)
 
         perf = -loss if self.cfg.use_loss_fitness else acc
         sparsity = _compute_sparsity(ind.genome)
@@ -603,11 +694,18 @@ class GeneticAlgorithmPruner:
         return offspring
 
     def _mutate(self, pop: List[Individual]) -> List[Individual]:
-        """Flip a single random bit for selected individuals."""
+        """Probabilistic multi-bit mutation for selected individuals.
+
+        Uses :func:`mutate_flip_prob` with ``p = 5 / genome_length`` so
+        that ~5 bits are flipped on average per mutant — orders of
+        magnitude faster exploration than single-bit mutation for the
+        large genomes typical of ResNet20 (~270 k parameters).
+        """
         mutants = []
+        p_flip = 5.0 / self.genome_length
         for ind in pop:
             if np.random.random() < self.cfg.mut_rate:
-                child_genome = mutate_single_bit(ind.genome)
+                child_genome = mutate_flip_prob(ind.genome, p=p_flip)
                 mutants.append(Individual(genome=child_genome, origin="mutate"))
         return mutants
 
@@ -638,24 +736,21 @@ class GeneticAlgorithmPruner:
     def _post_evolutionary_pruning(
         self, best: Individual
     ) -> Individual:
-        """Sequentially try to zero each active bit; keep if no perf drop."""
+        """Sequentially try to zero each active bit; keep if no perf drop.
+
+        Routes entirely through :meth:`_evaluate` so that pre-allocated GPU
+        mask tensors, the fitness cache, and proper weight restore are all
+        used — avoiding the old slow path that called
+        ``_evaluate_mask_on_data`` with explicit mask dicts.
+        """
         if self.verbose:
             print("\nPost-evolutionary pruning …")
         genome = best.genome.copy()
-        masks = bitvector_to_masks(genome, self.mask_template)
-        base_loss, _ = _evaluate_mask_on_data(
-            self.model, masks, self.train_loader,
-            self.criterion, self.device,
-            max_batches=self.cfg.max_eval_batches,
-        )
-        base_perf = -base_loss if self.cfg.use_loss_fitness else None
-        if not self.cfg.use_loss_fitness:
-            _, base_acc = _evaluate_mask_on_data(
-                self.model, masks, self.train_loader,
-                self.criterion, self.device,
-                max_batches=self.cfg.max_eval_batches,
-            )
-            base_perf = base_acc
+
+        # Baseline via the fast path (may be a cache hit)
+        tmp = Individual(genome=genome.copy())
+        tmp.fitness = self._evaluate(tmp)
+        base_perf = tmp.performance
 
         active_indices = np.where(genome == 1)[0]
         n_pruned = 0
@@ -664,15 +759,10 @@ class GeneticAlgorithmPruner:
         np.random.shuffle(active_indices)
         for idx in tqdm(active_indices, desc="Post-pruning", disable=not self.verbose):
             genome[idx] = 0
-            trial_masks = bitvector_to_masks(genome, self.mask_template)
-            loss, acc = _evaluate_mask_on_data(
-                self.model, trial_masks, self.train_loader,
-                self.criterion, self.device,
-                max_batches=self.cfg.max_eval_batches,
-            )
-            trial_perf = -loss if self.cfg.use_loss_fitness else acc
-            if trial_perf >= base_perf:
-                base_perf = trial_perf
+            trial = Individual(genome=genome.copy())
+            trial.fitness = self._evaluate(trial)  # fast path + cache
+            if trial.performance >= base_perf:
+                base_perf = trial.performance
                 n_pruned += 1
             else:
                 genome[idx] = 1  # revert
