@@ -608,11 +608,11 @@ def hybrid_pruning(
     device: str = "cuda",
     verbose: bool = True,
     # -- Adaptive oneshot ratio via Fisher trace ---------------------------
-    use_fisher_adaptive_ratio: bool = False,
+    use_fisher_adaptive_ratio: bool = True,
     fisher_num_batches: int = 10,
     fisher_sensitivity: float = 1.0,
     # -- Knowledge distillation (one-shot fine-tuning phase) ---------------
-    use_kd: bool = False,
+    use_kd: bool = True,
     kd_temperature: float = 4.0,
     kd_lambda: float = 0.5,
     # -- LR warmup at iterative-phase transition ---------------------------
@@ -623,11 +623,11 @@ def hybrid_pruning(
     time_limit_seconds: Optional[float] = None,
     resume_from: Optional[str] = None,
     # -- Performance optimizations ----------------------------------------
-    use_compile: bool = False,
-    use_ddp: bool = False,
-    use_cuda_graphs: bool = False,
-    profile_initial_training: bool = False,
-    profile_output_dir: Optional[str] = None,
+    use_compile: bool = True,
+    use_ddp: bool = True,
+    use_cuda_graphs: bool = True,
+    profile_initial_training: bool = True,
+    profile_output_dir: Optional[str] = "profiler_traces",
 ) -> Dict[str, Any]:
     """Run the complete hybrid pruning experiment.
 

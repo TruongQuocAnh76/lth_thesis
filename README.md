@@ -181,176 +181,18 @@ python -m src.experiments --algorithm hybrid \
 
 **Available Hybrid arguments:**
 - `--target_sparsity`: Target overall sparsity (default: 0.9)
-- `--oneshot_ratio`: Fraction of target to prune in one shot (optional).
-    - If omitted (`--oneshot_ratio` not provided) a conservative default (0.7) is used for building the pruning schedule.
-    - Prefer enabling `--use_fisher_adaptive_ratio` to let the implementation estimate a data-driven oneshot ratio after initial training (adaptive Fisher); when enabled the oneshot ratio will be recomputed and the schedule rebuilt.
-- `--iterative_step`: Fraction of remaining weights to prune per iterative step. Auto-selected if omitted: 10% when target < 80%, 2% when target > 80%
+- `--oneshot_ratio`: Fraction of target to prune in one shot (default: 0.7)
+- `--iterative_step`: Fraction of remaining weights to prune per iterative step.
 - `--initial_epochs`: Dense training epochs (default: 160)
-- `--initial_lr`: Learning rate for initial training (default: 0.01). Fine-tuning uses 1/10th of this
+- `--initial_lr`: Learning rate for initial training (default: 0.01).
 - `--oneshot_finetune_max_epochs`: Max epochs for fine-tuning after one-shot prune (default: 200)
 - `--oneshot_finetune_patience`: Early-stopping patience for one-shot fine-tuning (default: 200)
 - `--iter_finetune_max_epochs`: Max epochs per iterative fine-tuning step (default: 10)
 - `--iter_finetune_patience`: Early-stopping patience per iterative step (default: 10)
-- `--use_global_pruning`: Use global magnitude pruning (default: True)
 
-**Performance Optimizations (Hybrid only):**
+### 6. SynFlow (Synaptic Flow)
 
-The Hybrid implementation includes several opt-in performance features for faster training and profiling:
-
-- `--use_compile`: Apply `torch.compile()` to the model (PyTorch ≥ 2.0). Fuses operators for up to **1.5× throughput** improvement. Disabled by default due to first-epoch compilation overhead.
-
-- `--use_ddp`: Wrap model in `DistributedDataParallel` instead of `DataParallel` when multiple GPUs are available. Avoids Python GIL contention and is **20–50% faster** than DataParallel. Requires `torch.distributed` to be initialized (set `MASTER_ADDR`, `MASTER_PORT`, `RANK`, `WORLD_SIZE` env vars, or use `torchrun`).
-
-- `--use_cuda_graphs`: Capture fine-tuning training loops with CUDA Graphs to reduce kernel-launch overhead (~**10–30% speedup** for short epochs on CUDA). Only effective when there is no KD teacher and AMP is disabled. Silently falls back to the normal loop otherwise.
-
-- `--profile_initial_training`: Enable `torch.profiler` for the initial training phase. Exports a Chrome-trace JSON to TensorBoard format for bottleneck analysis (slow data loading, pruning sort, kernel overhead). Only runs when CUDA is available.
-
-- `--profile_output_dir`: Directory for profiler trace files (default: same as `checkpoint_dir`).
-
-**Example: Enable all optimizations**
-```bash
-python -m src.experiments --algorithm hybrid \
-    --model resnet20 --dataset cifar10 \
-    --target_sparsity 0.9 \
-    --use_compile --use_ddp --use_cuda_graphs \
-    --profile_initial_training --profile_output_dir ./profiler_traces
-```
-
-**Note:** `pin_memory=True` is already enabled in the data loaders for 10–20% faster CPU→GPU transfers.
-
-#### Checkpoint / Resume Support (for long sessions)
-
-Hybrid experiments support wall-clock aware checkpointing and resume.
-
-**Arguments:**
-- `--time_limit`: Wall-clock limit in seconds (e.g. `39600` for ~11 hours)
-- `--resume_from`: Path to a Hybrid checkpoint (`hybrid_checkpoint.pt`)
-- `--checkpoint_interval`: Save every N pruning phases (default: 10)
-
-**Checkpoint location:**
-```
-./results/hybrid/hybrid_{model}_{dataset}_s{target}_seed{seed}/checkpoints/
-    └── hybrid_checkpoint.pt
-```
-
-**Example: run with auto-save before timeout**
-```bash
-python -m src.experiments --algorithm hybrid --model resnet20 --dataset cifar10 \
-        --target_sparsity 0.9 --oneshot_ratio 0.7 \
-        --time_limit 39600 --checkpoint_interval 1
-```
-
-**Example: resume from saved checkpoint**
-```bash
-python -m src.experiments --algorithm hybrid --model resnet20 --dataset cifar10 \
-        --target_sparsity 0.9 --oneshot_ratio 0.7 \
-        --time_limit 39600 --checkpoint_interval 1 \
-        --resume_from ./results/hybrid/hybrid_resnet20_cifar10_s0.9_seed42/checkpoints/hybrid_checkpoint.pt
-```
-
-When resumed, Hybrid restores model state, masks, completed phase history,
-and random generator states to continue from the next pruning phase.
-
-### 6. Common Arguments
-
-All algorithms support:
-- `--model`: Model architecture (resnet20, resnet50, vgg16, vgg19)
-- `--dataset`: Dataset (cifar10, cifar100, mnist)
-- `--seed`: Random seed (default: 42)
-- `--device`: cuda or cpu (default: cuda)
-- `--batch_size`: Training batch size
-- `--learning_rate`: Initial learning rate (default: 0.1)
-- `--momentum`: SGD momentum (default: 0.9)
-- `--weight_decay`: Weight decay
-
-### 7. Quick Tests
-
-Run quick tests with reduced iterations (for validation):
-```bash
-python -m src.experiments --mode quick_imp
-python -m src.experiments --mode quick_earlybird
-python -m src.experiments --mode quick_grasp
-python -m src.experiments --mode quick_synflow
-```
-
-## Examples
-
-**IMP: Prune ResNet20 to 90% sparsity**
-```bash
-python -m src.experiments --algorithm imp --model resnet20 --dataset cifar10 \
-    --target_sparsity 0.9 --num_iterations 10
-```
-
-**Early-Bird: Find ResNet20 lottery tickets at 50% sparsity**
-```bash
-python -m src.experiments --algorithm earlybird_resnet --model resnet20 --dataset cifar10 \
-    --target_sparsity 0.5 --l1_coef 1e-4 --distance_threshold 0.1
-```
-
-**Early-Bird: VGG16 on CIFAR-100**
-```bash
-python -m src.experiments --algorithm earlybird --model vgg16 --dataset cifar100 \
-    --target_sparsity 0.5 --search_epochs 160 --finetune_epochs 160
-```
-
-**GA: CIFAR-10 with checkpoint/resume**
-```bash
-python -m src.experiments --algorithm genetic --model resnet20 --dataset cifar10 \
-    --population_size 100 --min_generations 100 --max_generations 200 \
-    --time_limit 39600 --checkpoint_interval 10
-```
-
-**GA: CIFAR-100 (resumed)**
-```bash
-python -m src.experiments --algorithm genetic --model resnet20 --dataset cifar100 \
-    --time_limit 39600 --checkpoint_interval 10 \
-    --resume_from ./results/genetic/ga_resnet20_cifar100_pop100_seed42/checkpoints/ga_checkpoint.pt
-```
-
-**SynFlow: Iterative data-free pruning on ResNet20**
-```bash
-python -m src.experiments --algorithm synflow --model resnet20 --dataset cifar10 \
-    --rho 10 --epochs 160 --synflow_iters 100
-```
-
-**SynFlow: ResNet20 on CIFAR-100 at ρ=2.5 (60% sparsity)**
-```bash
-python -m src.experiments --algorithm synflow --model resnet20 --dataset cifar100 \
-    --rho 2.5 --epochs 160 --synflow_iters 100
-```
-
-**Hybrid: ResNet20 to 90% sparsity (one-shot 63% + iterative 2%)**
-```bash
-python -m src.experiments --algorithm hybrid --model resnet20 --dataset cifar10 \
-    --target_sparsity 0.9 --oneshot_ratio 0.7 \
-    --oneshot_finetune_max_epochs 200 --iter_finetune_max_epochs 10
-```
-
-**Hybrid: CIFAR-100 moderate sparsity (one-shot + iterative 10%)**
-```bash
-python -m src.experiments --algorithm hybrid --model resnet20 --dataset cifar100 \
-    --target_sparsity 0.7 --oneshot_ratio 0.7 --iterative_step 0.10
-```
-
-## Hybrid-Improve (improved hybrid variant)
-
-The project includes an improved hybrid implementation. Run it via the unified
-experiment runner using `--algorithm hybrid_improve`. Example quick run:
-
-```bash
-python -m src.experiments --algorithm hybrid_improve \
-    --model resnet20 --dataset cifar10 --target_sparsity 0.8 \
-    --oneshot_ratio 0.7 --initial_epochs 100 --device cuda --seed 42
-```
-
-Notes:
-- Uses the full implementation in `src/hybrid_improve_impl.py`.
-- Prefer a CUDA device; FP16 inference is enabled where applicable for speed.
-- For full experiments use the same checkpoint and resume flags as `hybrid`.
-
-### 5. SynFlow (Synaptic Flow)
-
-Data-free iterative pruning at initialization with exponential schedule:
+Data-free iterative pruning at initialization that preserves gradient flow:
 
 ```bash
 python -m src.experiments --algorithm synflow \
@@ -366,78 +208,50 @@ python -m src.experiments --algorithm synflow \
 - `--rho`: Compression ratio ρ ≥ 1 (default: 10). ρ=1 no pruning, ρ=10 keep 10%, ρ=100 keep 1%
 - `--synflow_iters`: Number of iterative SynFlow pruning rounds (default: 100)
 - `--epochs`: Training epochs after pruning (default: 160)
-- `--lr_milestones`: Epochs at which to reduce LR (default: [80, 120])
-- `--lr_gamma`: LR decay factor (default: 0.1)
 
-### 6. Hybrid Pruning (One-Shot + Iterative Geometric)
+### 7. Hybrid-Improve (Adaptive Hybrid Pruning)
 
-Combines a large one-shot magnitude prune with iterative geometric refinement.
-Phases: dense training → large prune + extended fine-tune → iterative small prunes + short fine-tunes.
+The improved hybrid variant features adaptive oneshot ratio estimation, Knowledge Distillation (KD) support, and optimized training loops.
 
 ```bash
-python -m src.experiments --algorithm hybrid \
+python -m src.experiments --algorithm hybrid_improve \
     --model resnet20 \
     --dataset cifar10 \
     --seed 42 \
-    --target_sparsity 0.9 \
-    --oneshot_ratio 0.7 \
-    --initial_epochs 160 \
-    --oneshot_finetune_max_epochs 200 \
-    --oneshot_finetune_patience 200 \
-    --iter_finetune_max_epochs 10 \
-    --iter_finetune_patience 10
+    --target_sparsity 0.8 \
+    --initial_epochs 100 \
+    --oneshot_ratio 0.7
 ```
 
-**Available Hybrid arguments:**
-- `--target_sparsity`: Target overall sparsity (default: 0.9)
-- `--oneshot_ratio`: Fraction of target to prune in one shot (default: 0.7, i.e. 70% of target)
-- `--iterative_step`: Fraction of remaining weights to prune per iterative step. Auto-selected if omitted: 10% when target < 80%, 2% when target > 80%
-- `--initial_epochs`: Dense training epochs (default: 160)
-- `--initial_lr`: Learning rate for initial training (default: 0.01). Fine-tuning uses 1/10th of this
-- `--oneshot_finetune_max_epochs`: Max epochs for fine-tuning after one-shot prune (default: 200)
-- `--oneshot_finetune_patience`: Early-stopping patience for one-shot fine-tuning (default: 200)
-- `--iter_finetune_max_epochs`: Max epochs per iterative fine-tuning step (default: 10)
-- `--iter_finetune_patience`: Early-stopping patience per iterative step (default: 10)
-- `--use_global_pruning`: Use global magnitude pruning (default: True)
+**Available Hybrid-Improve arguments:**
+- `--target_sparsity`: Target overall sparsity (default: 0.8)
+- `--oneshot_ratio`: Fraction of target to prune in one shot (default: 0.7)
+- `--iterative_step`: Fraction of remaining weights per iterative step (default: 0.02)
+- `--initial_epochs`: Dense training epochs (default: 100)
+- `--initial_lr`: Learning rate for initial training (default: 0.1)
+- `--oneshot_finetune_max_epochs`: Max epochs for Phase 2 fine-tuning (default: 200)
+- `--oneshot_finetune_patience`: Patience for Phase 2 (default: 100)
+- `--iter_finetune_max_epochs`: Max epochs per Phase 3 step (default: 10)
+- `--iter_finetune_patience`: Patience per Phase 3 step (default: 5)
 
-**Performance Optimizations (Hybrid only):**
+**Advanced Features:**
+- `--checkpoint_interval`: Save checkpoint every N pruning stages (default: 1).
+- `--time_limit`: Wall-clock time limit in seconds to gracefully exit and save.
+- `--resume_from`: Path to a checkpoint file to resume the experiment.
 
-The Hybrid implementation includes several opt-in performance features for faster training and profiling:
-
-- `--use_compile`: Apply `torch.compile()` to the model (PyTorch ≥ 2.0). Fuses operators for up to **1.5× throughput** improvement. Disabled by default due to first-epoch compilation overhead.
-
-- `--use_ddp`: Wrap model in `DistributedDataParallel` instead of `DataParallel` when multiple GPUs are available. Avoids Python GIL contention and is **20–50% faster** than DataParallel. Requires `torch.distributed` to be initialized (set `MASTER_ADDR`, `MASTER_PORT`, `RANK`, `WORLD_SIZE` env vars, or use `torchrun`).
-
-- `--use_cuda_graphs`: Capture fine-tuning training loops with CUDA Graphs to reduce kernel-launch overhead (~**10–30% speedup** for short epochs on CUDA). Only effective when there is no KD teacher and AMP is disabled. Silently falls back to the normal loop otherwise.
-
-- `--profile_initial_training`: Enable `torch.profiler` for the initial training phase. Exports a Chrome-trace JSON to TensorBoard format for bottleneck analysis (slow data loading, pruning sort, kernel overhead). Only runs when CUDA is available.
-
-- `--profile_output_dir`: Directory for profiler trace files (default: same as `checkpoint_dir`).
-
-**Example: Enable all optimizations**
-```bash
-python -m src.experiments --algorithm hybrid \
-    --model resnet20 --dataset cifar10 \
-    --target_sparsity 0.9 \
-    --use_compile --use_ddp --use_cuda_graphs \
-    --profile_initial_training --profile_output_dir ./profiler_traces
-```
-
-**Note:** `pin_memory=True` is already enabled in the data loaders for 10–20% faster CPU→GPU transfers.
-
-### 7. Common Arguments
+### 8. Common Arguments
 
 All algorithms support:
-- `--model`: Model architecture (resnet20, resnet50, vgg16, vgg19)
+- `--model`: Architecture (resnet20, resnet50, vgg16, vgg19)
 - `--dataset`: Dataset (cifar10, cifar100, mnist)
 - `--seed`: Random seed (default: 42)
 - `--device`: cuda or cpu (default: cuda)
 - `--batch_size`: Training batch size
-- `--learning_rate`: Initial learning rate (default: 0.1)
+- `--learning_rate`: Initial learning rate
 - `--momentum`: SGD momentum (default: 0.9)
 - `--weight_decay`: Weight decay
 
-### 8. Quick Tests
+### 9. Quick Tests
 
 Run quick tests with reduced iterations (for validation):
 ```bash
@@ -446,6 +260,59 @@ python -m src.experiments --mode quick_earlybird
 python -m src.experiments --mode quick_grasp
 python -m src.experiments --mode quick_synflow
 ```
+
+## Output
+
+Results are saved to `./results/` with timestamps.
+
+## Kế hoạch
+
+## Tháng 1: Tháng 12/2025
+
+1. **Tuần 1**: Đọc các tài liệu cốt lõi về pruning và lottery ticket hypothesis.
+2. **Tuần 2**: Đọc tài liệu về các thuật toán pruning. Bắt đầu soạn thảo dàn ý Chương 2 (về Nền Tảng & Tổng Quan Tài Liệu). Xác định <= 8 baseline để triển khai (IMP, SNIP, GraSP, SynFlow, Early-Bird, Fisher Information pruning, Genetic algorithm, Hybrid).
+3. **Tuần 3**: Viết bản nháp ban đầu của các phần Chương 2. Thiết lập môi trường phát triển (PyTorch, Git repo, wandb để theo dõi).
+4. **Tuần 4**: Tái tạo 1 baseline (IMP) trên thiết lập nhỏ (CIFAR-10, ResNet-20).
+
+## Tháng 2: Tháng 1/2026
+
+5. **Tuần 5**: Hoàn tất bản nháp Chương 2. Tái tạo 2 (SNIP, GraSP) baseline. Xác thực so với kết quả tài liệu gốc.
+6. **Tuần 6**: Tái tạo baseline còn lại. Bắt đầu pseudocode cho phương pháp cải tiến đề xuất.
+7. **Tuần 7**: Gỡ lỗi baseline và chạy thử nghiệm ban đầu trên CIFAR-10/ResNet-20.
+8. **Tuần 8**: Hoàn thiện Chương 2.
+
+## Tháng 3: Tháng 2/2026
+
+9. **Tuần 9**: Thiết kế và triển khai phương pháp cải tiến.
+10. **Tuần 10**: Gỡ lỗi và xác thực trên quy mô nhỏ. So sánh kết quả ban đầu với baseline.
+11. **Tuần 11**: Tinh chỉnh phương pháp dựa trên kết quả sớm. Bắt đầu soạn thảo Chương 3 (Phương Pháp: Thiết Kế Nghiên Cứu, Baseline, Phương Pháp Đề Xuất).
+12. **Tuần 12**: Mở rộng đến các thiết lập khác (CIFAR-100, Resnet50/VGG-16). Chạy thử nghiệm sơ bộ.
+
+## Tháng 4: Tháng 3/2026
+
+13. **Tuần 13**: Mở rộng thử nghiệm đến thiết lập đầy đủ (2 bộ dữ liệu: CIFAR-10/100; 3 kiến trúc: ResNet-20/50, VGG-16). Chạy baseline với 3-5 seeds.
+14. **Tuần 14**: Chạy phương pháp cải tiến trên tất cả cấu hình.
+15. **Tuần 15**: Bắt đầu phân tích bổ sung.
+16. **Tuần 16**: Thu thập kết quả ban đầu. Soạn thảo Chương 4 (Thiết Lập Thử Nghiệm: Bộ Dữ Liệu, Kiến Trúc, Chỉ Số).
+
+## Tháng 5: Tháng 4/2026
+
+17. **Tuần 17**: Hoàn thành bất kỳ thử nghiệm còn lại.
+18. **Tuần 18**: Phân tích kết quả (so sánh baseline, ablation, hình ảnh hóa định tính). Soạn thảo Chương 5 (Kết Quả & Phân Tích: Bảng, biểu đồ, diễn giải).
+
+   *Trước 15/4: Đăng ký tên đề tài*
+
+19. **Tuần 19**: Hoàn thiện Chương 5. Bắt đầu bản nháp Chương 6 (Thảo Luận: Diễn Giải, So Sánh, Ý Nghĩa Thực Tế).
+20. **Tuần 20**: Hoàn thành Chương 6. Bắt đầu bản nháp Chương 7 (Kết Luận & Công Việc Tương Lai).
+
+## Tháng 6: Tháng 5/2026
+
+21. **Tuần 21**: Viết Chương 1 (Giới Thiệu), Tóm Tắt, Lời Cảm Ơn. Hoàn thiện Chương 7.
+22. **Tuần 22**: Tổng hợp toàn bộ khóa luận (tích hợp tất cả chương, tài liệu tham khảo, phụ lục). Thêm hình ảnh, đảm bảo 80-100 trang. Mở nguồn code trên GitHub.
+23. **Tuần 23**: Kiểm tra cuối cùng (ngữ pháp, trích dẫn—định dạng IEEE/APA).
+24. **Tuần 24**: Sửa chữa cuối cùng.
+
+*Nộp trước 20/5/2026*
 
 ## Output
 
