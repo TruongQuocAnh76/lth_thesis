@@ -2930,6 +2930,9 @@ def run_experiment(
         weight_decay = kwargs.get('weight_decay', 5e-4)
         seed = kwargs.get('seed', 42)
         device = kwargs.get('device', 'cuda')
+        resume_from = kwargs.get('resume_from', None)
+        time_limit_seconds = kwargs.get('time_limit_seconds', None)
+        checkpoint_interval = kwargs.get('checkpoint_interval', 1)
 
         results = hybrid_improve_pruning(
             model_name=model,
@@ -2949,6 +2952,9 @@ def run_experiment(
             weight_decay=weight_decay,
             seed=seed,
             device=device,
+            resume_from=resume_from,
+            time_limit_seconds=time_limit_seconds,
+            checkpoint_interval=checkpoint_interval,
             verbose=True,
         )
 
@@ -3249,6 +3255,22 @@ Examples:
             kwargs['time_limit_seconds'] = args.time_limit
             kwargs['checkpoint_interval'] = args.checkpoint_interval
 
+        elif args.algorithm == "hybrid_improve":
+            kwargs['target_sparsity'] = args.target_sparsity
+            kwargs['oneshot_ratio'] = args.oneshot_ratio
+            kwargs['iterative_step'] = args.iterative_step
+            kwargs['initial_epochs'] = args.initial_epochs
+            kwargs['initial_lr'] = args.initial_lr
+            kwargs['oneshot_finetune_max_epochs'] = args.oneshot_finetune_max_epochs
+            kwargs['oneshot_finetune_patience'] = args.oneshot_finetune_patience
+            kwargs['iter_finetune_max_epochs'] = args.iter_finetune_max_epochs
+            kwargs['iter_finetune_patience'] = args.iter_finetune_patience
+            kwargs['batch_size'] = args.batch_size if args.batch_size else 128
+            kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 5e-4
+            kwargs['resume_from'] = args.resume_from
+            kwargs['time_limit_seconds'] = args.time_limit
+            kwargs['checkpoint_interval'] = args.checkpoint_interval
+
         elif args.algorithm == "genetic":
             kwargs['population_size'] = args.population_size
             kwargs['rec_rate'] = args.rec_rate
@@ -3316,7 +3338,7 @@ Examples:
             print(f"GA Time: {fr.get('ga_time_seconds', 0):.2f}s")
             print(f"Generations: {fr.get('total_generations', 0)}")
             print(f"Total Time: {fr.get('total_time_seconds', 0):.2f}s")
-        elif args.algorithm == "hybrid":
+        elif args.algorithm in ("hybrid", "hybrid_improve"):
             fr = results.get('final_results', {})
             print(f"Final Sparsity: {fr.get('final_sparsity', 0):.2%}")
             print(f"Initial Test Accuracy: {fr.get('initial_test_accuracy', 0):.2f}%")
