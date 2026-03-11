@@ -279,6 +279,13 @@ def _finetune(
     lr_warmup_epochs: int = 0,
     # --- CUDA Graphs (reduces kernel-launch overhead) ---------------------
     use_cuda_graphs: bool = False,
+    # --- Checkpoint resume -----------------------------------------------
+    start_epoch: int = 0,
+    optimizer_state: Optional[dict] = None,
+    scheduler_state: Optional[dict] = None,
+    stopper_state: Optional[dict] = None,
+    initial_best_state: Optional[dict] = None,
+    on_epoch_end: Optional[Callable] = None,
 ) -> Dict[str, Any]:
     """Fine-tune a pruned model with early stopping.
 
@@ -324,6 +331,14 @@ def _finetune(
         else None
     )
     stopper = EarlyStopper(patience=patience, mode="max")
+    # Restore optimizer / scheduler / stopper state when resuming mid-finetune
+    if optimizer_state is not None:
+        optimizer.load_state_dict(optimizer_state)
+    if scheduler is not None and scheduler_state is not None:
+        scheduler.load_state_dict(scheduler_state)
+    if stopper_state is not None:
+        stopper.best = stopper_state["best"]
+        stopper.counter = stopper_state["counter"]
     # AMP and CUDA Graphs are mutually exclusive: graphs cannot be captured
     # while inside an autocast context. Prioritise AMP unless the caller
     # explicitly requested graphs (which already disable AMP in the guard below).
@@ -382,8 +397,12 @@ def _finetune(
         "test_losses": [],
         "test_accs": [],
     }
-    best_test_acc = 0.0
-    best_state = None
+    best_test_acc = (
+        stopper_state["best"]
+        if stopper_state and stopper_state.get("best", -math.inf) > -math.inf / 2
+        else 0.0
+    )
+    best_state = initial_best_state
 
     # ---- Build effective criterion and register KD hook ONCE (outside loop) ----
     # Re-creating the hook and the closure every epoch wastes memory and time.
@@ -411,7 +430,7 @@ def _finetune(
         effective_criterion = criterion
         _hook = None
 
-    pbar = tqdm(range(max_epochs), desc=desc, disable=not verbose)
+    pbar = tqdm(range(start_epoch, max_epochs), desc=desc, disable=not verbose)
     for epoch in pbar:
         # ---- LR warmup: linearly ramp from lr/10 → lr over warmup epochs ----
         if lr_warmup_epochs > 0 and epoch < lr_warmup_epochs:
@@ -473,7 +492,12 @@ def _finetune(
             best=f"{best_test_acc:.2f}%",
         )
 
-        if stopper.step(test_acc):
+        should_stop = stopper.step(test_acc)
+
+        if on_epoch_end is not None:
+            on_epoch_end(epoch, optimizer, scheduler, stopper, best_state)
+
+        if should_stop:
             pbar.set_description(f"{desc} (early-stop @ {epoch+1})")
             break
 
@@ -486,6 +510,7 @@ def _finetune(
         model.load_state_dict(best_state)
 
     history["epochs_run"] = epoch + 1  # type: ignore[possibly-undefined]
+    history["start_epoch"] = start_epoch
     history["best_test_acc"] = best_test_acc
     return history
 
@@ -507,6 +532,13 @@ def save_hybrid_checkpoint(
     numpy_rng_state: dict | None = None,
     torch_rng_state: Any = None,
     verbose: bool = True,
+    # Fine-grained stage info for intra-step resume
+    stage: Optional[str] = None,
+    ft_epoch: Optional[int] = None,
+    optimizer_state: Optional[dict] = None,
+    scheduler_state: Optional[dict] = None,
+    stopper_state: Optional[dict] = None,
+    best_model_state: Optional[dict] = None,
 ) -> Path:
     """Persist the full hybrid-pruning state so it can be resumed later.
 
@@ -522,6 +554,19 @@ def save_hybrid_checkpoint(
         numpy_rng_state: ``np.random.get_state()``.
         torch_rng_state: ``torch.random.get_rng_state()``.
         verbose: Print confirmation message.
+        stage: Fine-grained stage within the current step, e.g.
+            ``'oneshot_prune'``, ``'oneshot_finetune'``,
+            ``'iterative_prune'``, ``'iterative_finetune'``.
+        ft_epoch: Epoch index (0-based) just completed during fine-tuning.
+            ``None`` when not inside a fine-tuning phase.
+        optimizer_state: ``optimizer.state_dict()`` at checkpoint time.
+        scheduler_state: ``scheduler.state_dict()`` at checkpoint time
+            (``None`` if no scheduler is active).
+        stopper_state: Dict with keys ``'best'``, ``'counter'``, and
+            ``'mode'`` from the :class:`EarlyStopper`.
+        best_model_state: ``model.state_dict()`` of the best weights seen
+            so far during fine-tuning.  Restored on resume so that early
+            stopping picks up from the correct historical best.
 
     Returns:
         The resolved checkpoint path.
@@ -532,6 +577,8 @@ def save_hybrid_checkpoint(
     ckpt = {
         "phase": phase,
         "step_idx": step_idx,
+        "stage": stage,
+        "ft_epoch": ft_epoch,
         "model_state": model_state,
         "masks": masks,
         "results": results,
@@ -539,11 +586,18 @@ def save_hybrid_checkpoint(
         "elapsed_seconds": elapsed_seconds,
         "numpy_rng_state": numpy_rng_state or np.random.get_state(),
         "torch_rng_state": torch_rng_state or torch.random.get_rng_state(),
+        "optimizer_state": optimizer_state,
+        "scheduler_state": scheduler_state,
+        "stopper_state": stopper_state,
+        "best_model_state": best_model_state,
     }
     torch.save(ckpt, path)
     if verbose:
+        stage_str = f", stage={stage}" if stage else ""
+        ft_str = f", ft_epoch={ft_epoch}" if ft_epoch is not None else ""
         print(f"\n  Checkpoint saved → {path}  "
-              f"(phase={phase}, step={step_idx}, {elapsed_seconds:.0f}s elapsed)")
+              f"(phase={phase}, step={step_idx}{stage_str}{ft_str}, "
+              f"{elapsed_seconds:.0f}s elapsed)")
     return path
 
 
@@ -569,6 +623,15 @@ def load_hybrid_checkpoint(
         print(f"\n  Checkpoint loaded ← {path}")
         print(f"    phase          : {ckpt['phase']}")
         print(f"    step_idx       : {ckpt['step_idx']}")
+        _stage = ckpt.get('stage')
+        if _stage:
+            print(f"    stage          : {_stage}")
+        _ft_epoch = ckpt.get('ft_epoch')
+        if _ft_epoch is not None:
+            print(f"    ft_epoch       : {_ft_epoch}")
+        print(f"    has optimizer  : {'optimizer_state' in ckpt and ckpt['optimizer_state'] is not None}")
+        print(f"    has scheduler  : {'scheduler_state' in ckpt and ckpt['scheduler_state'] is not None}")
+        print(f"    has stopper    : {'stopper_state' in ckpt and ckpt['stopper_state'] is not None}")
         print(f"    elapsed        : {ckpt['elapsed_seconds']:.0f}s")
         n_phases = len(ckpt['results'].get('phases', []))
         print(f"    phases saved   : {n_phases}")
@@ -783,7 +846,7 @@ def hybrid_pruning(
             return False
         return remaining < margin
 
-    def _save_ckpt(phase: str, step_idx: int) -> Path:
+    def _save_ckpt(phase: str, step_idx: int, **kwargs) -> Path:
         return save_hybrid_checkpoint(
             _ckpt_path(),
             phase=phase,
@@ -794,6 +857,7 @@ def hybrid_pruning(
             config=config,
             elapsed_seconds=_elapsed(),
             verbose=verbose,
+            **kwargs,
         )
 
     # ------------------------------------------------------------------ #
@@ -822,7 +886,9 @@ def hybrid_pruning(
     total_start = _time.time()
     prior_elapsed = 0.0
     stopped_early = False
-    start_step_idx = 0  # which pruning step to start from
+    start_step_idx = 0          # which pruning step to start from
+    resume_finetune_only_step_idx = -1  # if >= 0, skip prune for this step
+    resume_finetune_state: Optional[Dict[str, Any]] = None
     set_seed(seed)
 
     # cudnn.benchmark: fastest cuDNN auto-tuner for fixed-size (32×32) CIFAR inputs
@@ -914,19 +980,43 @@ def hybrid_pruning(
         torch.random.set_rng_state(ckpt["torch_rng_state"])
 
         if ckpt["phase"] == "initial_training":
-            # Initial training was completed; skip it and start pruning
+            # Initial training was completed; skip it and start pruning from step 0
             skip_initial_training = True
             start_step_idx = 0
         elif ckpt["phase"] == "pruning":
             skip_initial_training = True
-            start_step_idx = ckpt["step_idx"] + 1  # resume from next step
+            ckpt_stage = ckpt.get("stage")
+            if ckpt_stage in ("oneshot_prune", "iterative_prune"):
+                # Pruning done, fine-tuning not yet started for this step
+                start_step_idx = ckpt["step_idx"]
+                resume_finetune_only_step_idx = ckpt["step_idx"]
+                resume_finetune_state = None  # start finetune from epoch 0
+            elif ckpt_stage in ("oneshot_finetune", "iterative_finetune"):
+                # Mid-fine-tuning: restore epoch, optimizer, scheduler and
+                # early-stopper state so training continues exactly where it stopped
+                start_step_idx = ckpt["step_idx"]
+                resume_finetune_only_step_idx = ckpt["step_idx"]
+                resume_finetune_state = {
+                    "start_epoch": (ckpt.get("ft_epoch") or 0) + 1,
+                    "optimizer_state": ckpt.get("optimizer_state"),
+                    "scheduler_state": ckpt.get("scheduler_state"),
+                    "stopper_state": ckpt.get("stopper_state"),
+                    "initial_best_state": ckpt.get("best_model_state"),
+                }
+            else:
+                # Old checkpoint format or post-finetune completed: skip to next step
+                start_step_idx = ckpt["step_idx"] + 1
         elif ckpt["phase"] == "done":
             print("Checkpoint indicates experiment already finished.")
             skip_initial_training = True
             start_step_idx = len(steps)  # skip all pruning steps
 
+        _resume_ft_msg = (
+            f", resume_finetune_only_step_idx={resume_finetune_only_step_idx}"
+            if resume_finetune_only_step_idx >= 0 else ""
+        )
         print(f"  Resuming: skip_initial_training={skip_initial_training}, "
-              f"start_step_idx={start_step_idx}")
+              f"start_step_idx={start_step_idx}{_resume_ft_msg}")
 
     # ------------------------------------------------------------------ #
     # Phase 1: Initial (dense) training
@@ -1084,6 +1174,7 @@ def hybrid_pruning(
             break
         is_oneshot = step_idx == 0
         phase_label = "one-shot" if is_oneshot else f"iter-{step_idx}"
+        ft_stage_name = "oneshot_finetune" if is_oneshot else "iterative_finetune"
 
         # Select fine-tuning hyper-parameters
         ft_max_epochs = (
@@ -1093,39 +1184,91 @@ def hybrid_pruning(
             oneshot_finetune_patience if is_oneshot else iter_finetune_patience
         )
 
-        current_sparsity = get_overall_sparsity(masks)
-        print(f"\n--- Phase {step_idx+2}: {phase_label} prune "
-              f"(ratio={prune_ratio:.4f}, "
-              f"current sparsity={current_sparsity:.2%}) ---")
+        # Determine if we should skip the prune for this step (resuming
+        # mid-finetune or after a prune that was already saved).
+        is_resume_finetune_only = (step_idx == resume_finetune_only_step_idx)
 
-        # Get weights for ranking
-        trained_weights = get_prunable_layers(raw_model)
+        if not is_resume_finetune_only:
+            current_sparsity = get_overall_sparsity(masks)
+            print(f"\n--- Phase {step_idx+2}: {phase_label} prune "
+                  f"(ratio={prune_ratio:.4f}, "
+                  f"current sparsity={current_sparsity:.2%}) ---")
 
-        # Prune
-        if use_global_pruning:
-            masks = prune_by_magnitude_global(prune_ratio, masks, trained_weights)
+            # Get weights for ranking
+            trained_weights = get_prunable_layers(raw_model)
+
+            # Prune
+            if use_global_pruning:
+                masks = prune_by_magnitude_global(prune_ratio, masks, trained_weights)
+            else:
+                percents = {k: prune_ratio for k in masks}
+                masks = prune_by_percent(percents, masks, trained_weights)
+
+            # Apply masks
+            apply_masks_to_model(raw_model, masks)
+            apply_fn = create_mask_apply_fn(raw_model)
+
+            new_sparsity = get_overall_sparsity(masks)
+            print(f"  Sparsity after prune: {new_sparsity:.2%}")
+
+            # Save post-prune checkpoint (prune done, fine-tune not yet started)
+            if checkpoint_dir is not None:
+                _save_ckpt(
+                    phase="pruning",
+                    step_idx=step_idx,
+                    stage="oneshot_prune" if is_oneshot else "iterative_prune",
+                )
         else:
-            percents = {k: prune_ratio for k in masks}
-            masks = prune_by_percent(percents, masks, trained_weights)
+            # Masks were already applied when the checkpoint was loaded;
+            # just rebuild the apply_fn and re-enforce zeros.
+            apply_fn = create_mask_apply_fn(raw_model)
+            apply_masks_to_model(raw_model, masks)
+            new_sparsity = get_overall_sparsity(masks)
+            print(f"\n--- Phase {step_idx+2}: {phase_label} (resuming fine-tuning, "
+                  f"sparsity={new_sparsity:.2%}) ---")
 
-        # Apply masks
-        apply_masks_to_model(raw_model, masks)
-        apply_fn = create_mask_apply_fn(raw_model)
-
-        new_sparsity = get_overall_sparsity(masks)
         # One-shot phase: optionally use KD teacher
         # Iterative phase: LR warmup at transition (step_idx == 1 only)
         ft_teacher = teacher_model if (is_oneshot and use_kd) else None
         ft_warmup = iter_lr_rewind_warmup_epochs if (not is_oneshot and step_idx == 1) else 0
 
-        print(f"  Sparsity after prune: {new_sparsity:.2%}")
         if ft_teacher is not None:
             print(f"  KD active (T={kd_temperature}, λ={kd_lambda})")
         if ft_warmup > 0:
             print(f"  LR warmup for first {ft_warmup} epochs (iterative transition)")
 
-        # Fine-tune with early stopping
+        # Determine the per-epoch checkpoint callback for mid-finetune saves.
+        # Default args capture the *current* step_idx and stage name so the
+        # closure stays correct across loop iterations.
+        def _on_epoch_end(ep, opt, sched, stopper_obj, best_s,
+                          _step=step_idx, _stage=ft_stage_name):
+            if (checkpoint_dir is not None
+                    and checkpoint_interval > 0
+                    and (ep + 1) % checkpoint_interval == 0):
+                _save_ckpt(
+                    phase="pruning",
+                    step_idx=_step,
+                    stage=_stage,
+                    ft_epoch=ep,
+                    optimizer_state=opt.state_dict(),
+                    scheduler_state=sched.state_dict() if sched is not None else None,
+                    stopper_state={
+                        "best": stopper_obj.best,
+                        "counter": stopper_obj.counter,
+                        "mode": stopper_obj.mode,
+                    },
+                    best_model_state=best_s,
+                )
 
+        # Unpack resume state for this step's finetune (if any)
+        _ft_resume = resume_finetune_state if is_resume_finetune_only else None
+        _ft_start_epoch = _ft_resume["start_epoch"] if _ft_resume else 0
+        _ft_opt_state = _ft_resume.get("optimizer_state") if _ft_resume else None
+        _ft_sched_state = _ft_resume.get("scheduler_state") if _ft_resume else None
+        _ft_stopper_state = _ft_resume.get("stopper_state") if _ft_resume else None
+        _ft_init_best = _ft_resume.get("initial_best_state") if _ft_resume else None
+
+        # Fine-tune with early stopping
         ft_history = _finetune(
             model=model,
             train_loader=train_loader,
@@ -1147,6 +1290,12 @@ def hybrid_pruning(
             kd_lambda=kd_lambda,
             lr_warmup_epochs=ft_warmup,
             use_cuda_graphs=use_cuda_graphs,
+            start_epoch=_ft_start_epoch,
+            optimizer_state=_ft_opt_state,
+            scheduler_state=_ft_sched_state,
+            stopper_state=_ft_stopper_state,
+            initial_best_state=_ft_init_best,
+            on_epoch_end=_on_epoch_end,
         )
 
         _, phase_test_acc = evaluate(model, test_loader, criterion, device)
@@ -1173,7 +1322,7 @@ def hybrid_pruning(
               f"best acc: {ft_history['best_test_acc']:.2f}%, "
               f"final acc: {phase_test_acc:.2f}%")
 
-        # Periodic checkpoint
+        # Post-step checkpoint (step complete; no optimizer state needed)
         if (checkpoint_dir is not None
                 and checkpoint_interval > 0
                 and (step_idx + 1) % checkpoint_interval == 0):
