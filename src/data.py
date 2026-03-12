@@ -2,6 +2,8 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, random_split
+from torch.utils.data.distributed import DistributedSampler
+import torch.distributed as dist
 import os
 
 def get_dataset(dataset_name, train=True, download=True, data_dir='./data'):
@@ -69,8 +71,20 @@ def get_dataloaders(
     # persistent_workers requires at least one worker process
     _persistent = persistent_workers and num_workers > 0
 
-    # Get full training dataset
-    train_dataset = get_dataset(dataset_name, train=True, data_dir=data_dir, download=True)
+    is_distributed = dist.is_initialized()
+    rank = dist.get_rank() if is_distributed else 0
+
+    # Only rank 0 downloads; all others wait at the barrier
+    if rank == 0:
+        train_dataset = get_dataset(dataset_name, train=True, data_dir=data_dir, download=True)
+        test_dataset  = get_dataset(dataset_name, train=False, data_dir=data_dir, download=True)
+
+    if is_distributed:
+        dist.barrier()  # block non-zero ranks until rank 0 finishes writing files
+
+    if rank != 0:
+        train_dataset = get_dataset(dataset_name, train=True, data_dir=data_dir, download=False)
+        test_dataset  = get_dataset(dataset_name, train=False, data_dir=data_dir, download=False)
 
     # Split into train and validation
     val_size = int(len(train_dataset) * val_split)
@@ -78,23 +92,30 @@ def get_dataloaders(
     train_subset, val_subset = random_split(train_dataset, [train_size, val_size],
                                              generator=torch.Generator().manual_seed(42))
 
-    # Get test dataset
-    test_dataset = get_dataset(dataset_name, train=False, data_dir=data_dir, download=True)
+    # Use DistributedSampler under DDP so each GPU sees a unique shard
+    if is_distributed:
+        train_sampler = DistributedSampler(train_subset, shuffle=True)
+        val_sampler   = DistributedSampler(val_subset, shuffle=False)
+        test_sampler  = DistributedSampler(test_dataset, shuffle=False)
+        train_shuffle = False  # sampler owns shuffling
+    else:
+        train_sampler = val_sampler = test_sampler = None
+        train_shuffle = True
 
     # Create data loaders
     train_loader = DataLoader(
-        train_subset, batch_size=batch_size, shuffle=True,
-        num_workers=num_workers, pin_memory=pin_memory,
+        train_subset, batch_size=batch_size, shuffle=train_shuffle,
+        sampler=train_sampler, num_workers=num_workers, pin_memory=pin_memory,
         persistent_workers=_persistent,
     )
     val_loader = DataLoader(
         val_subset, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=pin_memory,
+        sampler=val_sampler, num_workers=num_workers, pin_memory=pin_memory,
         persistent_workers=_persistent,
     )
     test_loader = DataLoader(
         test_dataset, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=pin_memory,
+        sampler=test_sampler, num_workers=num_workers, pin_memory=pin_memory,
         persistent_workers=_persistent,
     )
 
