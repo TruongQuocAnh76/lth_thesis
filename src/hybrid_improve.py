@@ -689,7 +689,7 @@ def hybrid_pruning(
     use_compile: bool = True,
     use_ddp: bool = True,
     use_cuda_graphs: bool = True,
-    profile_initial_training: bool = True,
+    profile_initial_training: bool = False,
     profile_output_dir: Optional[str] = "profiler_traces",
 ) -> Dict[str, Any]:
     """Run the complete hybrid pruning experiment.
