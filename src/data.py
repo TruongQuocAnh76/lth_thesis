@@ -70,7 +70,7 @@ def get_dataloaders(
     _persistent = persistent_workers and num_workers > 0
 
     # Get full training dataset
-    train_dataset = get_dataset(dataset_name, train=True, data_dir=data_dir)
+    train_dataset = get_dataset(dataset_name, train=True, data_dir=data_dir, download=True)
 
     # Split into train and validation
     val_size = int(len(train_dataset) * val_split)
@@ -79,7 +79,7 @@ def get_dataloaders(
                                              generator=torch.Generator().manual_seed(42))
 
     # Get test dataset
-    test_dataset = get_dataset(dataset_name, train=False, data_dir=data_dir)
+    test_dataset = get_dataset(dataset_name, train=False, data_dir=data_dir, download=True)
 
     # Create data loaders
     train_loader = DataLoader(
