@@ -54,7 +54,7 @@ from src.util import (
 )
 from src.grasp import grasp, get_grasp_sparsity
 from src.synflow import synflow_pruning, apply_synflow_masks, get_synflow_sparsity
-from src.ga import GAConfig, GeneticAlgorithmPruner
+from src.ga import GAConfig, GeneticAlgorithmPruner, make_ga_dataloader
 # Optional improved hybrid algorithm wrapper (falls back to src.hybrid)
 from src.hybrid import hybrid_pruning
 # Direct import from the user-provided module `src/hybrid_improve.py`.
@@ -1398,7 +1398,7 @@ class GAExperiment:
         initial_ab_threshold: float = 0.7,
         ab_decay_rate: float = 0.95,
         use_loss_fitness: bool = True,
-        max_eval_batches: Optional[int] = None,
+        max_eval_batches: int = 4,
         post_prune: bool = True,
         # Training hyper-parameters (applied after GA)
         epochs: int = 160,
@@ -1606,6 +1606,11 @@ class GAExperiment:
         )
         train_loader = loaders['train']
         test_loader = loaders['test']
+        ga_loader = make_ga_dataloader(
+            train_loader.dataset,
+            batch_size=512,
+            num_workers=4,
+        )
 
         # Model (Kaiming init — same as other experiments)
         model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
@@ -1664,7 +1669,7 @@ class GAExperiment:
                 pruner, resume_info = GeneticAlgorithmPruner.load_checkpoint(
                     path=self.resume_from,
                     model=model,
-                    train_loader=train_loader,
+                    train_loader=ga_loader,
                     device=self.device,
                     config=self.ga_cfg,
                     verbose=True,
@@ -1672,7 +1677,7 @@ class GAExperiment:
             else:
                 pruner = GeneticAlgorithmPruner(
                     model=model,
-                    train_loader=train_loader,
+                    train_loader=ga_loader,
                     device=self.device,
                     config=self.ga_cfg,
                     verbose=True,
@@ -1928,7 +1933,7 @@ def run_ga_experiment(
     max_generations: int = 200,
     stagnation_threshold: int = 50,
     use_loss_fitness: bool = True,
-    max_eval_batches: Optional[int] = None,
+    max_eval_batches: int = 4,
     post_prune: bool = True,
     epochs: int = 160,
     learning_rate: float = 0.1,
@@ -2815,7 +2820,7 @@ def run_experiment(
         initial_ab_threshold = kwargs.get('initial_ab_threshold', 0.7)
         ab_decay_rate = kwargs.get('ab_decay_rate', 0.95)
         use_loss_fitness = kwargs.get('use_loss_fitness', True)
-        max_eval_batches = kwargs.get('max_eval_batches', None)
+        max_eval_batches = kwargs.get('max_eval_batches', 4)
         post_prune = kwargs.get('post_prune', True)
         epochs = kwargs.get('epochs', 160)
         batch_size = kwargs.get('batch_size', 128)
@@ -3107,8 +3112,8 @@ Examples:
                          help="Use adaptive accuracy bound for population init")
     ga_group.add_argument("--use_loss_fitness", action="store_true", default=True,
                          help="Use negative loss as fitness (default: True)")
-    ga_group.add_argument("--max_eval_batches", type=int, default=None,
-                         help="Max batches per fitness evaluation (None=all data)")
+    ga_group.add_argument("--max_eval_batches", type=int, default=4,
+                         help="Max batches per fitness evaluation (default: 4)")
     ga_group.add_argument("--no_post_prune", action="store_true", default=False,
                          help="Disable post-evolutionary pruning")
 
