@@ -19,6 +19,9 @@ Reference implementation: ``pruning-benchmark/`` ``HybridStepScheduler``.
 """
 
 import copy
+import csv
+import datetime
+import json
 import math
 import os
 import time as _time
@@ -54,6 +57,28 @@ from src.util import (
 )
 from src.model import get_model, count_parameters
 from src.data import get_dataloaders
+
+
+# =========================================================================
+# Helpers
+# =========================================================================
+
+def _convert_to_serializable(obj):
+    """Convert numpy / torch types to Python native types for JSON serialization."""
+    if isinstance(obj, dict):
+        return {k: _convert_to_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_to_serializable(v) for v in obj]
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, (np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, (np.int32, np.int64)):
+        return int(obj)
+    elif isinstance(obj, torch.Tensor):
+        return obj.tolist()
+    else:
+        return obj
 
 
 # =========================================================================
@@ -685,6 +710,8 @@ def hybrid_pruning(
     checkpoint_interval: int = 1,
     time_limit_seconds: Optional[float] = None,
     resume_from: Optional[str] = None,
+    # -- Results saving ---------------------------------------------------
+    save_dir: Optional[str] = "./results",
     # -- Performance optimizations ----------------------------------------
     use_compile: bool = False,
     use_ddp: bool = False,
@@ -1375,5 +1402,41 @@ def hybrid_pruning(
     # Attach model & masks for downstream usage
     results["model"] = model
     results["masks"] = masks
+
+    # ------------------------------------------------------------------ #
+    # Persist results to disk
+    # ------------------------------------------------------------------ #
+    if save_dir is not None:
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = (f"hybrid_improve_{model_name}_{dataset_name}"
+                f"_s{target_sparsity}_seed{seed}")
+        result_dir = Path(save_dir) / "hybrid_improve" / name / timestamp
+        result_dir.mkdir(parents=True, exist_ok=True)
+
+        # JSON — exclude non-serializable model/masks keys
+        results_to_save = {k: v for k, v in results.items()
+                           if k not in ("model", "masks")}
+        with open(result_dir / "results.json", "w") as f:
+            json.dump(_convert_to_serializable(results_to_save), f, indent=2)
+
+        # Summary CSV (phases)
+        with open(result_dir / "summary.csv", "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["step", "label", "sparsity", "best_test_acc", "final_test_acc",
+                             "finetune_epochs"])
+            for p in results.get("phases", []):
+                writer.writerow([
+                    p.get("step"), p.get("label"),
+                    p.get("sparsity_after_prune"), p.get("best_test_acc"),
+                    p.get("final_test_acc"), p.get("finetune_epochs_run"),
+                ])
+
+        # Model checkpoint and masks
+        torch.save(model.state_dict(), result_dir / "final_model.pt")
+        masks_torch = {k: torch.from_numpy(v) if isinstance(v, np.ndarray) else v
+                       for k, v in masks.items()}
+        torch.save(masks_torch, result_dir / "masks.pt")
+
+        print(f"Results saved to: {result_dir}")
 
     return results
