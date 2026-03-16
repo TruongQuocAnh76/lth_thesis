@@ -686,7 +686,7 @@ def hybrid_pruning(
     time_limit_seconds: Optional[float] = None,
     resume_from: Optional[str] = None,
     # -- Performance optimizations ----------------------------------------
-    use_compile: bool = True,
+    use_compile: bool = False,
     use_ddp: bool = False,
     use_cuda_graphs: bool = True,
     profile_initial_training: bool = False,
