@@ -687,7 +687,7 @@ def hybrid_pruning(
     resume_from: Optional[str] = None,
     # -- Performance optimizations ----------------------------------------
     use_compile: bool = True,
-    use_ddp: bool = True,
+    use_ddp: bool = False,
     use_cuda_graphs: bool = True,
     profile_initial_training: bool = False,
     profile_output_dir: Optional[str] = "profiler_traces",
