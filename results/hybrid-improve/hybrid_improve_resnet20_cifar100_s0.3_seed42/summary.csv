@@ -1,0 +1,4 @@
+step,label,prune_ratio,sparsity_after_prune,finetune_epochs_run,best_test_acc,final_test_acc
+-1,initial_training,0.0,0.0,160,65.96,65.96
+0,one-shot,0.2122,0.2122,200,66.38,66.37
+1,iter-1,0.1115,0.3000,10,65.79,65.78
