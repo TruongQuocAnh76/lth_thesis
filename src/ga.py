@@ -28,6 +28,8 @@ from __future__ import annotations
 import os
 import pickle
 import time
+import json
+import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -957,4 +959,87 @@ class GeneticAlgorithmPruner:
             },
         }
 
+        # Persist GA-only results for standalone usage (masks + GA stats)
+        try:
+            self._save_results(best_masks, stats)
+        except Exception:
+            # Don't break normal flow if saving fails
+            if self.verbose:
+                print("Warning: failed to save GA results")
+
         return best_masks, stats
+
+    # ----------------------- Persistence --------------------------- #
+    def _convert_to_serializable(self, obj):
+        # minimal conversion for numpy / python native types
+        if isinstance(obj, dict):
+            return {k: self._convert_to_serializable(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [self._convert_to_serializable(v) for v in obj]
+        try:
+            import numpy as _np
+            if isinstance(obj, _np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, (_np.float32, _np.float64)):
+                return float(obj)
+            if isinstance(obj, (_np.int32, _np.int64)):
+                return int(obj)
+        except Exception:
+            pass
+        if isinstance(obj, (float, int, str, bool)) or obj is None:
+            return obj
+        # fallback to string
+        return str(obj)
+
+    def _save_ga_history_csv(self, path: Path, gens: List[Dict[str, Any]]):
+        import csv
+        if not gens:
+            return
+        with open(path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                'generation', 'best_perf', 'best_sparsity',
+                'mean_perf', 'std_perf', 'mean_sparsity',
+                'pop_before_select', 'cache_size', 'cache_hit_rate',
+            ])
+            for g in gens:
+                writer.writerow([
+                    g.get('generation', ''),
+                    f"{g.get('best_perf', 0):.6f}",
+                    f"{g.get('best_sparsity', 0):.6f}",
+                    f"{g.get('mean_perf', 0):.6f}",
+                    f"{g.get('std_perf', 0):.6f}",
+                    f"{g.get('mean_sparsity', 0):.6f}",
+                    g.get('pop_size_before_select', ''),
+                    g.get('cache_size', ''),
+                    f"{g.get('cache_hit_rate', 0):.4f}",
+                ])
+
+    def _save_results(self, masks: Dict[str, np.ndarray], stats: Dict[str, Any]):
+        """Save GA results: JSON stats, GA history CSV, and masks (torch).
+
+        Uses `self.cfg.checkpoint_dir` if set, otherwise `./results/genetic/`.
+        """
+        base = Path(self.cfg.checkpoint_dir) if self.cfg.checkpoint_dir else Path("./results")
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = f"genetic_genome{self.genome_length}_pop{self.cfg.population_size}"
+        result_dir = base / "genetic" / name / timestamp
+        result_dir.mkdir(parents=True, exist_ok=True)
+
+        # JSON
+        results_ser = self._convert_to_serializable({'stats': stats, 'meta': {
+            'genome_length': self.genome_length,
+            'population_size': self.cfg.population_size,
+        }})
+        with open(result_dir / "results.json", 'w') as f:
+            json.dump(results_ser, f, indent=2)
+
+        # GA generation history CSV
+        self._save_ga_history_csv(result_dir / "ga_history.csv", stats.get('generations', []))
+
+        # Masks (torch)
+        masks_torch = {k: torch.from_numpy(v) for k, v in masks.items()}
+        torch.save(masks_torch, result_dir / "masks.pt")
+
+        if self.verbose:
+            print(f"GA results saved to: {result_dir}")
