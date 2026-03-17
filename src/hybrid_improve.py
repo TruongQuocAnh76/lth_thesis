@@ -39,6 +39,9 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from typing import Dict, List, Any, Optional, Callable, Tuple
 from tqdm import tqdm
 from torch.cuda.amp import GradScaler
+import json
+import datetime
+import csv
 import torch.nn.functional as F
 
 from src.train import train_epoch, evaluate
@@ -1403,40 +1406,83 @@ def hybrid_pruning(
     results["model"] = model
     results["masks"] = masks
 
-    # ------------------------------------------------------------------ #
-    # Persist results to disk
-    # ------------------------------------------------------------------ #
-    if save_dir is not None:
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        name = (f"hybrid_improve_{model_name}_{dataset_name}"
-                f"_s{target_sparsity}_seed{seed}")
-        result_dir = Path(save_dir) / "hybrid_improve" / name / timestamp
-        result_dir.mkdir(parents=True, exist_ok=True)
+    # Save to IMP-style directory format
+    def make_serializable(obj):
+        """Convert numpy types to Python native types for JSON serialization."""
+        if isinstance(obj, dict):
+            return {k: make_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [make_serializable(v) for v in obj]
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.float32, np.float64)):
+            return float(obj)
+        elif isinstance(obj, (np.int32, np.int64)):
+            return int(obj)
+        elif isinstance(obj, torch.Tensor):
+            return obj.tolist()
+        else:
+            return obj
 
-        # JSON — exclude non-serializable model/masks keys
-        results_to_save = {k: v for k, v in results.items()
-                           if k not in ("model", "masks")}
-        with open(result_dir / "results.json", "w") as f:
-            json.dump(_convert_to_serializable(results_to_save), f, indent=2)
-
-        # Summary CSV (phases)
-        with open(result_dir / "summary.csv", "w", newline="") as f:
+    def save_summary_csv(path, results_dict):
+        """Save iteration results as CSV."""
+        with open(path, 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(["step", "label", "sparsity", "best_test_acc", "final_test_acc",
-                             "finetune_epochs"])
-            for p in results.get("phases", []):
+            # Header
+            writer.writerow([
+                'step', 'label', 'prune_ratio', 'sparsity_after_prune',
+                'finetune_epochs_run', 'best_test_acc', 'final_test_acc'
+            ])
+            
+            # Initial training row
+            if 'initial_training' in results_dict:
+                init_res = results_dict['initial_training']
                 writer.writerow([
-                    p.get("step"), p.get("label"),
-                    p.get("sparsity_after_prune"), p.get("best_test_acc"),
-                    p.get("final_test_acc"), p.get("finetune_epochs_run"),
+                    -1, 'initial_training', 0.0, 0.0,
+                    len(init_res.get('train_losses', [])),
+                    f"{init_res.get('best_test_acc', init_res.get('final_test_acc', 0.0)):.2f}",
+                    f"{init_res.get('final_test_acc', 0.0):.2f}"
+                ])
+                
+            # Data rows from phases
+            for phase in results_dict.get('phases', []):
+                writer.writerow([
+                    phase.get('step', ''),
+                    phase.get('label', ''),
+                    f"{phase.get('prune_ratio', 0):.4f}",
+                    f"{phase.get('sparsity_after_prune', 0):.4f}",
+                    phase.get('finetune_epochs_run', ''),
+                    f"{phase.get('best_test_acc', 0):.2f}",
+                    f"{phase.get('final_test_acc', 0):.2f}"
                 ])
 
-        # Model checkpoint and masks
-        torch.save(model.state_dict(), result_dir / "final_model.pt")
-        masks_torch = {k: torch.from_numpy(v) if isinstance(v, np.ndarray) else v
-                       for k, v in masks.items()}
-        torch.save(masks_torch, result_dir / "masks.pt")
+    # Construct the save directory
+    base_results_dir = Path(checkpoint_dir).parent.parent if checkpoint_dir else Path("./results")
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    experiment_name = f"hybrid_improve_{model_name}_{dataset_name}_s{target_sparsity}_seed{seed}"
+    result_dir = base_results_dir / "hybrid_improve" / experiment_name / timestamp
+    result_dir.mkdir(parents=True, exist_ok=True)
 
-        print(f"Results saved to: {result_dir}")
+    # Save JSON results
+    results_to_serialize = {k: v for k, v in results.items() if k not in ["model", "masks"]}
+    results_serializable = make_serializable(results_to_serialize)
+    results_path = result_dir / "results.json"
+    with open(results_path, 'w') as f:
+        json.dump(results_serializable, f, indent=2)
+
+    # Save summary CSV
+    summary_path = result_dir / "summary.csv"
+    save_summary_csv(summary_path, results)
+
+    # Save final model state and masks
+    if "model" in results:
+        final_model_path = result_dir / "final_model.pt"
+        torch.save(results["model"].state_dict(), final_model_path)
+    if "masks" in results:
+        masks_path = result_dir / "final_masks.pt"
+        masks_torch = {k: torch.from_numpy(v) for k, v in results["masks"].items()}
+        torch.save(masks_torch, masks_path)
+
+    print(f"\nIMP-style results saved to: {result_dir}")
 
     return results

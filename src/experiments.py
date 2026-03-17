@@ -2920,6 +2920,9 @@ def run_experiment(
         return hybrid_results
 
     elif algorithm.lower() == "hybrid_improve":
+        hybrid_name = f"hybrid_improve_{model}_{dataset}_s{target_sparsity}_seed{seed}"
+        checkpoint_dir = Path("./results") / "hybrid_improve" / hybrid_name / "checkpoints"
+
         # Hybrid-improve parameters (same defaults as the paper config used in the notebook)
         target_sparsity = kwargs.get('target_sparsity', 0.8)
         oneshot_ratio = kwargs.get('oneshot_ratio', 0.7)
@@ -2957,6 +2960,7 @@ def run_experiment(
             weight_decay=weight_decay,
             seed=seed,
             device=device,
+            checkpoint_dir=str(checkpoint_dir),
             resume_from=resume_from,
             time_limit_seconds=time_limit_seconds,
             checkpoint_interval=checkpoint_interval,

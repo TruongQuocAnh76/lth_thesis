@@ -1,0 +1,4 @@
+step,label,sparsity,best_test_acc,final_test_acc,finetune_epochs
+0,one-shot,0.4766146417813478,91.49,91.49,200
+1,iter-1,0.5812968814600437,90.96,90.97,10
+2,iter-2,0.600012550942059,91.25,91.24,10
