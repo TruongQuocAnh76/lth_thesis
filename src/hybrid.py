@@ -742,7 +742,7 @@ def hybrid_pruning(
             desc=f"FT {phase_label}",
         )
 
-        _, phase_test_acc = evaluate(model, test_loader, criterion, device)
+        # _, phase_test_acc = evaluate(model, test_loader, criterion, device)
 
         phase_result = {
             "step": step_idx,
@@ -753,7 +753,7 @@ def hybrid_pruning(
             "finetune_max_epochs": ft_max_epochs,
             "finetune_patience": ft_patience,
             "best_test_acc": ft_history["best_test_acc"],
-            "final_test_acc": phase_test_acc,
+            "final_test_acc": ft_history["best_test_acc"],
             "train_losses": ft_history["train_losses"],
             "train_accs": ft_history["train_accs"],
             "test_losses": ft_history["test_losses"],
@@ -764,7 +764,7 @@ def hybrid_pruning(
 
         print(f"  FT done ({ft_history['epochs_run']} epochs) — "
               f"best acc: {ft_history['best_test_acc']:.2f}%, "
-              f"final acc: {phase_test_acc:.2f}%")
+              f"final acc: {ft_history['best_test_acc']:.2f}%")
 
         # Periodic checkpoint
         if (checkpoint_dir is not None
