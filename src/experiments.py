@@ -620,8 +620,10 @@ class EarlyBirdExperiment:
         )
     
     def _create_scheduler(self, optimizer: optim.Optimizer, epochs: int) -> Any:
-        """Create learning rate scheduler."""
-        return CosineAnnealingLR(optimizer, T_max=epochs)
+        """Create learning rate scheduler (StepLR: 0.1→0.01 at 80, 0.001 at 120)."""
+        from torch.optim.lr_scheduler import StepLR, MultiStepLR
+        # Paper uses milestones at 80 and 120
+        return MultiStepLR(optimizer, milestones=[80, 120], gamma=0.1)
     
     def _train_epoch_with_l1(
         self,
@@ -877,8 +879,8 @@ class EarlyBirdExperiment:
         print("PHASE 2: Training with Early-Bird Channel Mask")
         print(f"{'='*60}")
         
-        # Reset to initial weights and apply discovered channel mask
-        model.load_state_dict(copy.deepcopy(initial_state_dict))
+        # PHASE 2: Apply discovered channel mask to current weights (no re-init)
+        # Paper: "EB Train inherits the unpruned weights from the drawn EB ticket"
         apply_masks_to_model(model, weight_mask)
         
         # Create fresh optimizer and scheduler for finetuning
