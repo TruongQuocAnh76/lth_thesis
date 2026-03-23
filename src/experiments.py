@@ -3447,8 +3447,6 @@ Examples:
     eb_group.add_argument("--pruning_method", type=str, default="global",
                          choices=["global", "layerwise"],
                          help="Pruning method (Early-Bird)")
-    eb_group.add_argument("--target_sparsity", type=float, default=0.5,
-                         help="Target channel sparsity (fraction of channels to prune) for Early-Bird (e.g., 0.5 for 50% pruned)")
     
     # GraSP-specific arguments
     grasp_group = parser.add_argument_group('GraSP arguments')
