@@ -3206,9 +3206,28 @@ def run_experiment(
         result_dir.mkdir(parents=True, exist_ok=True)
 
         # Remove non-serializable objects (model, masks)
+
         results_serializable = dict(hybrid_results)
         model_obj = results_serializable.pop("model", None)
         masks_obj = results_serializable.pop("masks", None)
+
+        # Ensure final_results is present and contains all metrics
+        # Always ensure all new metrics are present in final_results, but do not overwrite existing values
+        required_metrics = [
+            "flops_reduction", "dense_flops", "pruned_flops",
+            "dense_latency_ms", "pruned_latency_ms",
+            "dense_throughput", "pruned_throughput"
+        ]
+        if "final_results" not in results_serializable or not isinstance(results_serializable["final_results"], dict):
+            results_serializable["final_results"] = {}
+        for metric in required_metrics:
+            if metric not in results_serializable["final_results"]:
+                # Try to get from hybrid_results["final_results"] if available
+                value = None
+                if hasattr(hybrid_results, "get"):
+                    fr = hybrid_results.get("final_results", {})
+                    value = fr.get(metric, None)
+                results_serializable["final_results"][metric] = value
 
         # Save JSON
         results_path = result_dir / "results.json"
