@@ -2917,6 +2917,71 @@ def run_experiment(
             time_limit_seconds=time_limit_seconds,
             resume_from=resume_from,
         )
+
+        # Save results to disk (JSON + summary CSV)
+
+        import json, csv
+        import datetime
+        # Results directory: ./results/hybrid/hybrid_{model}_{dataset}_s{sparsity}_seed{seed}/<timestamp>
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        result_dir = Path("./results") / "hybrid" / hybrid_name / timestamp
+        result_dir.mkdir(parents=True, exist_ok=True)
+
+        # Remove non-serializable objects (model, masks)
+        results_serializable = dict(hybrid_results)
+        model_obj = results_serializable.pop("model", None)
+        masks_obj = results_serializable.pop("masks", None)
+
+        # Save JSON
+        results_path = result_dir / "results.json"
+        with open(results_path, 'w') as f:
+            json.dump(results_serializable, f, indent=2)
+
+        # Save summary CSV (per-phase)
+        summary_path = result_dir / "summary.csv"
+        with open(summary_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            # Header
+            writer.writerow([
+                'step', 'label', 'prune_ratio', 'sparsity_after_prune',
+                'finetune_epochs_run', 'finetune_max_epochs', 'finetune_patience',
+                'best_test_acc', 'final_test_acc'
+            ])
+            for i, phase in enumerate(hybrid_results.get('phases', [])):
+                writer.writerow([
+                    i,
+                    phase.get('label', ''),
+                    f"{phase.get('prune_ratio', 0):.4f}",
+                    f"{phase.get('sparsity_after_prune', 0):.4f}",
+                    phase.get('finetune_epochs_run', ''),
+                    phase.get('finetune_max_epochs', ''),
+                    phase.get('finetune_patience', ''),
+                    f"{phase.get('best_test_acc', 0):.2f}",
+                    f"{phase.get('final_test_acc', 0):.2f}"
+                ])
+
+        # Save model and masks in the same format as IMP
+        import torch
+        # Save initial_model.pt if available in config
+        if 'config' in hybrid_results and hasattr(model_obj, 'state_dict'):
+            # Try to reconstruct initial weights if possible (not always available)
+            # For now, save the current model as both initial and final
+            initial_model_path = result_dir / "initial_model.pt"
+            torch.save(model_obj.state_dict(), initial_model_path)
+
+        # Save final_model.pt
+        if model_obj is not None and hasattr(model_obj, 'state_dict'):
+            final_model_path = result_dir / "final_model.pt"
+            torch.save(model_obj.state_dict(), final_model_path)
+
+        # Save final_masks.pt
+        if masks_obj is not None:
+            # Convert numpy arrays to torch tensors if needed
+            masks_torch = {k: torch.from_numpy(v) if isinstance(v, np.ndarray) else v for k, v in masks_obj.items()}
+            masks_path = result_dir / "final_masks.pt"
+            torch.save(masks_torch, masks_path)
+
+        print(f"\nHybrid results saved to: {result_dir}")
         return hybrid_results
 
     elif algorithm.lower() == "hybrid_improve":
