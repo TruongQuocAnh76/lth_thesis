@@ -5,7 +5,21 @@
 
 # Usage
 
+
 This project implements multiple pruning algorithms for the Lottery Ticket Hypothesis. You can run experiments using the unified command-line interface.
+
+## Experiment Output Format
+
+All experiment outputs (model checkpoints, masks, metrics, logs) are saved in a standardized format for every algorithm. For full details and example output, see [RESULTS_FORMAT.md](RESULTS_FORMAT.md).
+
+**Key output files for each experiment:**
+- `results.json`: Full config, training history, and all final metrics (including FLOPS, latency, training cost, etc.)
+- `summary.csv`: Epoch-by-epoch training/test metrics
+- `final_model.pt`: Final trained model weights
+- `final_masks.pt`: Final pruning masks
+- `initial_model.pt`: Initial model weights before pruning
+
+All algorithms (IMP, Early-Bird, GraSP, SynFlow, GA, Hybrid, Hybrid-Improve) produce this unified output format for easy downstream analysis.
 
 ## Installation
 
@@ -260,123 +274,3 @@ python -m src.experiments --mode quick_earlybird
 python -m src.experiments --mode quick_grasp
 python -m src.experiments --mode quick_synflow
 ```
-
-## Output
-
-Results are saved to `./results/` with timestamps.
-
-## Kế hoạch
-
-## Tháng 1: Tháng 12/2025
-
-1. **Tuần 1**: Đọc các tài liệu cốt lõi về pruning và lottery ticket hypothesis.
-2. **Tuần 2**: Đọc tài liệu về các thuật toán pruning. Bắt đầu soạn thảo dàn ý Chương 2 (về Nền Tảng & Tổng Quan Tài Liệu). Xác định <= 8 baseline để triển khai (IMP, SNIP, GraSP, SynFlow, Early-Bird, Fisher Information pruning, Genetic algorithm, Hybrid).
-3. **Tuần 3**: Viết bản nháp ban đầu của các phần Chương 2. Thiết lập môi trường phát triển (PyTorch, Git repo, wandb để theo dõi).
-4. **Tuần 4**: Tái tạo 1 baseline (IMP) trên thiết lập nhỏ (CIFAR-10, ResNet-20).
-
-## Tháng 2: Tháng 1/2026
-
-5. **Tuần 5**: Hoàn tất bản nháp Chương 2. Tái tạo 2 (SNIP, GraSP) baseline. Xác thực so với kết quả tài liệu gốc.
-6. **Tuần 6**: Tái tạo baseline còn lại. Bắt đầu pseudocode cho phương pháp cải tiến đề xuất.
-7. **Tuần 7**: Gỡ lỗi baseline và chạy thử nghiệm ban đầu trên CIFAR-10/ResNet-20.
-8. **Tuần 8**: Hoàn thiện Chương 2.
-
-## Tháng 3: Tháng 2/2026
-
-9. **Tuần 9**: Thiết kế và triển khai phương pháp cải tiến.
-10. **Tuần 10**: Gỡ lỗi và xác thực trên quy mô nhỏ. So sánh kết quả ban đầu với baseline.
-11. **Tuần 11**: Tinh chỉnh phương pháp dựa trên kết quả sớm. Bắt đầu soạn thảo Chương 3 (Phương Pháp: Thiết Kế Nghiên Cứu, Baseline, Phương Pháp Đề Xuất).
-12. **Tuần 12**: Mở rộng đến các thiết lập khác (CIFAR-100, Resnet50/VGG-16). Chạy thử nghiệm sơ bộ.
-
-## Tháng 4: Tháng 3/2026
-
-13. **Tuần 13**: Mở rộng thử nghiệm đến thiết lập đầy đủ (2 bộ dữ liệu: CIFAR-10/100; 3 kiến trúc: ResNet-20/50, VGG-16). Chạy baseline với 3-5 seeds.
-14. **Tuần 14**: Chạy phương pháp cải tiến trên tất cả cấu hình.
-15. **Tuần 15**: Bắt đầu phân tích bổ sung.
-16. **Tuần 16**: Thu thập kết quả ban đầu. Soạn thảo Chương 4 (Thiết Lập Thử Nghiệm: Bộ Dữ Liệu, Kiến Trúc, Chỉ Số).
-
-## Tháng 5: Tháng 4/2026
-
-17. **Tuần 17**: Hoàn thành bất kỳ thử nghiệm còn lại.
-18. **Tuần 18**: Phân tích kết quả (so sánh baseline, ablation, hình ảnh hóa định tính). Soạn thảo Chương 5 (Kết Quả & Phân Tích: Bảng, biểu đồ, diễn giải).
-
-   *Trước 15/4: Đăng ký tên đề tài*
-
-19. **Tuần 19**: Hoàn thiện Chương 5. Bắt đầu bản nháp Chương 6 (Thảo Luận: Diễn Giải, So Sánh, Ý Nghĩa Thực Tế).
-20. **Tuần 20**: Hoàn thành Chương 6. Bắt đầu bản nháp Chương 7 (Kết Luận & Công Việc Tương Lai).
-
-## Tháng 6: Tháng 5/2026
-
-21. **Tuần 21**: Viết Chương 1 (Giới Thiệu), Tóm Tắt, Lời Cảm Ơn. Hoàn thiện Chương 7.
-22. **Tuần 22**: Tổng hợp toàn bộ khóa luận (tích hợp tất cả chương, tài liệu tham khảo, phụ lục). Thêm hình ảnh, đảm bảo 80-100 trang. Mở nguồn code trên GitHub.
-23. **Tuần 23**: Kiểm tra cuối cùng (ngữ pháp, trích dẫn—định dạng IEEE/APA).
-24. **Tuần 24**: Sửa chữa cuối cùng.
-
-*Nộp trước 20/5/2026*
-
-## Output
-
-Results are saved to `./results/` with timestamps:
-```
-results/
-├── earlybird_resnet/
-├── grasp/
-├── imp/
-├── synflow/
-└── ...
-```
-
-Each result directory contains:
-- `results.json`: Algorithm configuration, training history, final accuracies and sparsity metrics
-- `summary.csv`: Epoch-by-epoch training/test metrics
-- `final_model.pt`: Trained model state dict
-- `masks.pt` or `final_masks.pt`: Pruning masks
-
-# Kế hoạch
-
-## Tháng 1: Tháng 12/2025
-
-1. **Tuần 1**: Đọc các tài liệu cốt lõi về pruning và lottery ticket hypothesis.
-2. **Tuần 2**: Đọc tài liệu về các thuật toán pruning. Bắt đầu soạn thảo dàn ý Chương 2 (về Nền Tảng & Tổng Quan Tài Liệu). Xác định <= 8 baseline để triển khai (IMP, SNIP, GraSP, SynFlow, Early-Bird, Fisher Information pruning, Genetic algorithm, Hybrid).
-3. **Tuần 3**: Viết bản nháp ban đầu của các phần Chương 2. Thiết lập môi trường phát triển (PyTorch, Git repo, wandb để theo dõi).
-4. **Tuần 4**: Tái tạo 1 baseline (IMP) trên thiết lập nhỏ (CIFAR-10, ResNet-20).
-
-## Tháng 2: Tháng 1/2026
-
-5. **Tuần 5**: Hoàn tất bản nháp Chương 2. Tái tạo 2 (SNIP, GraSP) baseline. Xác thực so với kết quả tài liệu gốc.
-6. **Tuần 6**: Tái tạo baseline còn lại. Bắt đầu pseudocode cho phương pháp cải tiến đề xuất.
-7. **Tuần 7**: Gỡ lỗi baseline và chạy thử nghiệm ban đầu trên CIFAR-10/ResNet-20.
-8. **Tuần 8**: Hoàn thiện Chương 2.
-
-## Tháng 3: Tháng 2/2026
-
-9. **Tuần 9**: Thiết kế và triển khai phương pháp cải tiến.
-10. **Tuần 10**: Gỡ lỗi và xác thực trên quy mô nhỏ. So sánh kết quả ban đầu với baseline.
-11. **Tuần 11**: Tinh chỉnh phương pháp dựa trên kết quả sớm. Bắt đầu soạn thảo Chương 3 (Phương Pháp: Thiết Kế Nghiên Cứu, Baseline, Phương Pháp Đề Xuất).
-12. **Tuần 12**: Mở rộng đến các thiết lập khác (CIFAR-100, Resnet50/VGG-16). Chạy thử nghiệm sơ bộ.
-
-## Tháng 4: Tháng 3/2026
-
-13. **Tuần 13**: Mở rộng thử nghiệm đến thiết lập đầy đủ (2 bộ dữ liệu: CIFAR-10/100; 3 kiến trúc: ResNet-20/50, VGG-16). Chạy baseline với 3-5 seeds.
-14. **Tuần 14**: Chạy phương pháp cải tiến trên tất cả cấu hình.
-15. **Tuần 15**: Bắt đầu phân tích bổ sung.
-16. **Tuần 16**: Thu thập kết quả ban đầu. Soạn thảo Chương 4 (Thiết Lập Thử Nghiệm: Bộ Dữ Liệu, Kiến Trúc, Chỉ Số).
-
-## Tháng 5: Tháng 4/2026
-
-17. **Tuần 17**: Hoàn thành bất kỳ thử nghiệm còn lại.
-18. **Tuần 18**: Phân tích kết quả (so sánh baseline, ablation, hình ảnh hóa định tính). Soạn thảo Chương 5 (Kết Quả & Phân Tích: Bảng, biểu đồ, diễn giải).
-
-   *Trước 15/4: Đăng ký tên đề tài*
-
-19. **Tuần 19**: Hoàn thiện Chương 5. Bắt đầu bản nháp Chương 6 (Thảo Luận: Diễn Giải, So Sánh, Ý Nghĩa Thực Tế).
-20. **Tuần 20**: Hoàn thành Chương 6. Bắt đầu bản nháp Chương 7 (Kết Luận & Công Việc Tương Lai).
-
-## Tháng 6: Tháng 5/2026
-
-21. **Tuần 21**: Viết Chương 1 (Giới Thiệu), Tóm Tắt, Lời Cảm Ơn. Hoàn thiện Chương 7.
-22. **Tuần 22**: Tổng hợp toàn bộ khóa luận (tích hợp tất cả chương, tài liệu tham khảo, phụ lục). Thêm hình ảnh, đảm bảo 80-100 trang. Mở nguồn code trên GitHub.
-23. **Tuần 23**: Kiểm tra cuối cùng (ngữ pháp, trích dẫn—định dạng IEEE/APA).
-24. **Tuần 24**: Sửa chữa cuối cùng.
-
-*Nộp trước 20/5/2026*

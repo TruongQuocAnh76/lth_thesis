@@ -793,6 +793,58 @@ def hybrid_pruning(
         else 0.0
     )
 
+    # Compute FLOPS and latency metrics
+    try:
+        from thop import profile
+    except ImportError:
+        profile = None
+
+    flops_reduction = None
+    dense_flops = None
+    pruned_flops = None
+    dense_latency_ms = None
+    pruned_latency_ms = None
+    dense_throughput = None
+    pruned_throughput = None
+
+    dummy_input = torch.randn(1, 3, 32, 32, device=device)
+    model.eval()
+
+    # Compute dense FLOPS and latency
+    dense_model = get_model(model_name, num_classes=num_classes).to(device)
+    dense_model.eval()
+    if profile is not None:
+        dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
+    import time as _time
+    def measure_latency(model, x, num_runs=30, warmup=10):
+        with torch.no_grad():
+            for _ in range(warmup):
+                _ = model(x)
+            if device.type == 'cuda':
+                torch.cuda.synchronize()
+            start = _time.perf_counter()
+            for _ in range(num_runs):
+                _ = model(x)
+            if device.type == 'cuda':
+                torch.cuda.synchronize()
+            end = _time.perf_counter()
+        latency_ms = (end - start) * 1000 / num_runs
+        throughput = 1.0 / ((end - start) / num_runs)
+        return latency_ms, throughput
+    dense_latency_ms, dense_throughput = measure_latency(dense_model, dummy_input)
+
+    # Compute pruned FLOPS and latency (after applying final mask)
+    pruned_model = get_model(model_name, num_classes=num_classes).to(device)
+    pruned_model.load_state_dict(copy.deepcopy(model.state_dict()))
+    apply_masks_to_model(pruned_model, masks)
+    pruned_model.eval()
+    if profile is not None:
+        pruned_flops, _ = profile(pruned_model, inputs=(dummy_input,), verbose=False)
+    pruned_latency_ms, pruned_throughput = measure_latency(pruned_model, dummy_input)
+
+    if dense_flops and pruned_flops:
+        flops_reduction = float(dense_flops) / float(pruned_flops) if pruned_flops > 0 else None
+
     results["final_results"] = {
         "final_sparsity": final_sparsity,
         "final_test_accuracy": final_test_acc,
@@ -800,6 +852,13 @@ def hybrid_pruning(
         "initial_test_accuracy": init_test_acc,
         "total_time_seconds": total_time,
         "stopped_early": stopped_early,
+        "flops_reduction": flops_reduction,
+        "dense_flops": dense_flops,
+        "pruned_flops": pruned_flops,
+        "dense_latency_ms": dense_latency_ms,
+        "pruned_latency_ms": pruned_latency_ms,
+        "dense_throughput": dense_throughput,
+        "pruned_throughput": pruned_throughput,
     }
 
     # Final checkpoint

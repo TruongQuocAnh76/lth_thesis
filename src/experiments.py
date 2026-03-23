@@ -216,6 +216,9 @@ class IMPExperiment:
         # Loss function
         criterion = nn.CrossEntropyLoss()
         
+        # Measure total training computational cost
+        overall_start_time = time.time()
+
         # Run iterative magnitude pruning
         for iteration in range(self.num_iterations + 1):
             print(f"\n{'='*40}")
@@ -290,20 +293,91 @@ class IMPExperiment:
                     masks = prune_by_percent(prune_percents, masks, trained_weights)
         
         # Final results
+        final_sparsity = get_overall_sparsity(masks)
+        final_test_accuracy = self.results['iterations'][-1]['test_accuracy']
+        initial_test_accuracy = self.results['iterations'][0]['test_accuracy']
+        accuracy_at_target_sparsity = self.results['iterations'][-1]['test_accuracy']
+
+        # Compute FLOPS and latency metrics
+        try:
+            from thop import profile
+        except ImportError:
+            profile = None
+
+        flops_reduction = None
+        dense_flops = None
+        pruned_flops = None
+        dense_latency_ms = None
+        pruned_latency_ms = None
+        dense_throughput = None
+        pruned_throughput = None
+
+        # Prepare dummy input for CIFAR (3,32,32)
+        dummy_input = torch.randn(1, 3, 32, 32, device=self.device)
+        model.eval()
+
+        # Compute dense FLOPS and latency
+        dense_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
+        dense_model.eval()
+        if profile is not None:
+            dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
+        # Latency (warmup + timing)
+        import time as _time
+        def measure_latency(model, x, num_runs=30, warmup=10):
+            with torch.no_grad():
+                for _ in range(warmup):
+                    _ = model(x)
+                if self.device.type == 'cuda':
+                    torch.cuda.synchronize()
+                start = _time.perf_counter()
+                for _ in range(num_runs):
+                    _ = model(x)
+                if self.device.type == 'cuda':
+                    torch.cuda.synchronize()
+                end = _time.perf_counter()
+            latency_ms = (end - start) * 1000 / num_runs
+            throughput = 1.0 / ((end - start) / num_runs)
+            return latency_ms, throughput
+        dense_latency_ms, dense_throughput = measure_latency(dense_model, dummy_input)
+
+        # Compute pruned FLOPS and latency (after applying final mask)
+        pruned_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
+        pruned_model.load_state_dict(copy.deepcopy(model.state_dict()))
+        apply_masks_to_model(pruned_model, masks)
+        pruned_model.eval()
+        if profile is not None:
+            pruned_flops, _ = profile(pruned_model, inputs=(dummy_input,), verbose=False)
+        pruned_latency_ms, pruned_throughput = measure_latency(pruned_model, dummy_input)
+
+        if dense_flops and pruned_flops:
+            flops_reduction = float(dense_flops) / float(pruned_flops) if pruned_flops > 0 else None
+
+        # Training computational cost
+        overall_end_time = time.time()
+        total_training_seconds = overall_end_time - overall_start_time
+
         self.results['final_results'] = {
-            'final_sparsity': get_overall_sparsity(masks),
-            'final_test_accuracy': self.results['iterations'][-1]['test_accuracy'],
-            'initial_test_accuracy': self.results['iterations'][0]['test_accuracy'],
-            'accuracy_at_target_sparsity': self.results['iterations'][-1]['test_accuracy'],
+            'final_sparsity': final_sparsity,
+            'final_test_accuracy': final_test_accuracy,
+            'initial_test_accuracy': initial_test_accuracy,
+            'accuracy_at_target_sparsity': accuracy_at_target_sparsity,
+            'flops_reduction': flops_reduction,
+            'dense_flops': dense_flops,
+            'pruned_flops': pruned_flops,
+            'dense_latency_ms': dense_latency_ms,
+            'pruned_latency_ms': pruned_latency_ms,
+            'dense_throughput': dense_throughput,
+            'pruned_throughput': pruned_throughput,
+            'training_computational_cost_seconds': total_training_seconds,
         }
-        
+
         # Store final model state and masks for saving
         self.final_model_state_dict = copy.deepcopy(model.state_dict())
         self.final_masks = masks
-        
+
         # Save results
         self._save_results()
-        
+
         return self.results
     
     def _save_results(self):
@@ -694,6 +768,7 @@ class EarlyBirdExperiment:
         
         # Set random seed
         set_seed(self.seed)
+        overall_start_time = time.time()
         
         # Load data
         print("Loading dataset...")
@@ -847,7 +922,61 @@ class EarlyBirdExperiment:
             'channel_sparsities': {k: float(1 - m.mean()) for k, m in channel_mask.items()}
         }
         
-        # Final results
+        # Compute FLOPS and latency metrics
+        try:
+            from thop import profile
+        except ImportError:
+            profile = None
+
+        flops_reduction = None
+        dense_flops = None
+        pruned_flops = None
+        dense_latency_ms = None
+        pruned_latency_ms = None
+        dense_throughput = None
+        pruned_throughput = None
+
+        dummy_input = torch.randn(1, 3, 32, 32, device=self.device)
+        model.eval()
+
+        # Compute dense FLOPS and latency
+        dense_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
+        dense_model.eval()
+        if profile is not None:
+            dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
+        import time as _time
+        def measure_latency(model, x, num_runs=30, warmup=10):
+            with torch.no_grad():
+                for _ in range(warmup):
+                    _ = model(x)
+                if self.device.type == 'cuda':
+                    torch.cuda.synchronize()
+                start = _time.perf_counter()
+                for _ in range(num_runs):
+                    _ = model(x)
+                if self.device.type == 'cuda':
+                    torch.cuda.synchronize()
+                end = _time.perf_counter()
+            latency_ms = (end - start) * 1000 / num_runs
+            throughput = 1.0 / ((end - start) / num_runs)
+            return latency_ms, throughput
+        dense_latency_ms, dense_throughput = measure_latency(dense_model, dummy_input)
+
+        # Compute pruned FLOPS and latency (after applying final mask)
+        pruned_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
+        pruned_model.load_state_dict(copy.deepcopy(model.state_dict()))
+        apply_masks_to_model(pruned_model, self.weight_mask)
+        pruned_model.eval()
+        if profile is not None:
+            pruned_flops, _ = profile(pruned_model, inputs=(dummy_input,), verbose=False)
+        pruned_latency_ms, pruned_throughput = measure_latency(pruned_model, dummy_input)
+
+        if dense_flops and pruned_flops:
+            flops_reduction = float(dense_flops) / float(pruned_flops) if pruned_flops > 0 else None
+
+        overall_end_time = time.time()
+        total_training_seconds = overall_end_time - overall_start_time
+
         self.results['final_results'] = {
             'channel_sparsity': channel_sparsity,
             'final_test_accuracy': final_test_acc,
@@ -858,7 +987,15 @@ class EarlyBirdExperiment:
             'training_efficiency': (
                 search_results['convergence_epoch'] / self.search_epochs
                 if search_results['converged'] else 1.0
-            )
+            ),
+            'flops_reduction': flops_reduction,
+            'dense_flops': dense_flops,
+            'pruned_flops': pruned_flops,
+            'dense_latency_ms': dense_latency_ms,
+            'pruned_latency_ms': pruned_latency_ms,
+            'dense_throughput': dense_throughput,
+            'pruned_throughput': pruned_throughput,
+            'training_computational_cost_seconds': total_training_seconds,
         }
         
         # Store final model and masks
@@ -901,12 +1038,15 @@ class EarlyBirdExperiment:
         if hasattr(self, 'channel_mask'):
             masks_torch = {k: torch.from_numpy(v) for k, v in self.channel_mask.items()}
             torch.save(masks_torch, result_dir / "channel_mask.pt")
-        
+
         # Save weight mask (expanded from channel mask)
         if hasattr(self, 'weight_mask'):
             masks_torch = {k: torch.from_numpy(v) for k, v in self.weight_mask.items()}
             torch.save(masks_torch, result_dir / "weight_mask.pt")
-        
+
+            # For IMP-style compatibility, also save as final_masks.pt
+            torch.save(masks_torch, result_dir / "final_masks.pt")
+
         print(f"\nResults saved to: {result_dir}")
     
     def _make_serializable(self, obj):
@@ -1189,6 +1329,7 @@ class GraSPExperiment:
             'layer_sparsities': {k: v for k, v in layer_sp.items() if k != 'overall'},
         }
 
+        overall_start_time = time.time()
         # ---- Train ----
         apply_fn = create_mask_apply_fn(model)
         optimizer = optim.SGD(
@@ -1225,10 +1366,73 @@ class GraSPExperiment:
             'test_losses': history['test_losses'],
             'test_accs': history['test_accs'],
         }
+        # Compute FLOPS and latency metrics
+        try:
+            from thop import profile
+        except ImportError:
+            profile = None
+
+        flops_reduction = None
+        dense_flops = None
+        pruned_flops = None
+        dense_latency_ms = None
+        pruned_latency_ms = None
+        dense_throughput = None
+        pruned_throughput = None
+
+        dummy_input = torch.randn(1, 3, 32, 32, device=self.device)
+        model.eval()
+
+        # Compute dense FLOPS and latency
+        dense_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
+        dense_model.eval()
+        if profile is not None:
+            dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
+        import time as _time
+        def measure_latency(model, x, num_runs=30, warmup=10):
+            with torch.no_grad():
+                for _ in range(warmup):
+                    _ = model(x)
+                if self.device.type == 'cuda':
+                    torch.cuda.synchronize()
+                start = _time.perf_counter()
+                for _ in range(num_runs):
+                    _ = model(x)
+                if self.device.type == 'cuda':
+                    torch.cuda.synchronize()
+                end = _time.perf_counter()
+            latency_ms = (end - start) * 1000 / num_runs
+            throughput = 1.0 / ((end - start) / num_runs)
+            return latency_ms, throughput
+        dense_latency_ms, dense_throughput = measure_latency(dense_model, dummy_input)
+
+        # Compute pruned FLOPS and latency (after applying final mask)
+        pruned_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
+        pruned_model.load_state_dict(copy.deepcopy(model.state_dict()))
+        apply_masks_to_model(pruned_model, masks)
+        pruned_model.eval()
+        if profile is not None:
+            pruned_flops, _ = profile(pruned_model, inputs=(dummy_input,), verbose=False)
+        pruned_latency_ms, pruned_throughput = measure_latency(pruned_model, dummy_input)
+
+        if dense_flops and pruned_flops:
+            flops_reduction = float(dense_flops) / float(pruned_flops) if pruned_flops > 0 else None
+
+        overall_end_time = time.time()
+        total_training_seconds = overall_end_time - overall_start_time
+
         self.results['final_results'] = {
             'best_test_accuracy': best_test,
             'final_test_accuracy': final_test,
             'overall_sparsity': layer_sp['overall'],
+            'flops_reduction': flops_reduction,
+            'dense_flops': dense_flops,
+            'pruned_flops': pruned_flops,
+            'dense_latency_ms': dense_latency_ms,
+            'pruned_latency_ms': pruned_latency_ms,
+            'dense_throughput': dense_throughput,
+            'pruned_throughput': pruned_throughput,
+            'training_computational_cost_seconds': total_training_seconds,
         }
 
         print(f"\n✓ Done — best test acc: {best_test:.2f}%, "
@@ -1258,9 +1462,14 @@ class GraSPExperiment:
         self._save_summary_csv(result_dir / "summary.csv")
 
         # Checkpoints
+        # Save final model
         torch.save(model.state_dict(), result_dir / "final_model.pt")
+        # Save final masks with new name
         masks_torch = {k: torch.from_numpy(v) for k, v in masks.items()}
-        torch.save(masks_torch, result_dir / "masks.pt")
+        torch.save(masks_torch, result_dir / "final_masks.pt")
+        # Save initial model if available
+        if hasattr(self, "initial_state_dict") and self.initial_state_dict is not None:
+            torch.save(self.initial_state_dict, result_dir / "initial_model.pt")
 
         print(f"Results saved to: {result_dir}")
 
@@ -1877,9 +2086,14 @@ class GAExperiment:
         self._save_ga_history_csv(result_dir / "ga_history.csv")
 
         # Checkpoints
+        # Save final model
         torch.save(model.state_dict(), result_dir / "final_model.pt")
+        # Save final masks with new name
         masks_torch = {k: torch.from_numpy(v) for k, v in masks.items()}
-        torch.save(masks_torch, result_dir / "masks.pt")
+        torch.save(masks_torch, result_dir / "final_masks.pt")
+        # Save initial model if available
+        if hasattr(self, "initial_state_dict") and self.initial_state_dict is not None:
+            torch.save(self.initial_state_dict, result_dir / "initial_model.pt")
 
         print(f"Results saved to: {result_dir}")
 
@@ -2205,6 +2419,58 @@ class SynFlowExperiment:
             'test_accs': history['test_accs'],
             'training_time_seconds': train_time,
         }
+        # Compute FLOPS and latency metrics
+        try:
+            from thop import profile
+        except ImportError:
+            profile = None
+
+        flops_reduction = None
+        dense_flops = None
+        pruned_flops = None
+        dense_latency_ms = None
+        pruned_latency_ms = None
+        dense_throughput = None
+        pruned_throughput = None
+
+        dummy_input = torch.randn(1, 3, 32, 32, device=self.device)
+        model.eval()
+
+        # Compute dense FLOPS and latency
+        dense_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
+        dense_model.eval()
+        if profile is not None:
+            dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
+        import time as _time
+        def measure_latency(model, x, num_runs=30, warmup=10):
+            with torch.no_grad():
+                for _ in range(warmup):
+                    _ = model(x)
+                if self.device.type == 'cuda':
+                    torch.cuda.synchronize()
+                start = _time.perf_counter()
+                for _ in range(num_runs):
+                    _ = model(x)
+                if self.device.type == 'cuda':
+                    torch.cuda.synchronize()
+                end = _time.perf_counter()
+            latency_ms = (end - start) * 1000 / num_runs
+            throughput = 1.0 / ((end - start) / num_runs)
+            return latency_ms, throughput
+        dense_latency_ms, dense_throughput = measure_latency(dense_model, dummy_input)
+
+        # Compute pruned FLOPS and latency (after applying final mask)
+        pruned_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
+        pruned_model.load_state_dict(copy.deepcopy(model.state_dict()))
+        apply_synflow_masks(pruned_model, masks)
+        pruned_model.eval()
+        if profile is not None:
+            pruned_flops, _ = profile(pruned_model, inputs=(dummy_input,), verbose=False)
+        pruned_latency_ms, pruned_throughput = measure_latency(pruned_model, dummy_input)
+
+        if dense_flops and pruned_flops:
+            flops_reduction = float(dense_flops) / float(pruned_flops) if pruned_flops > 0 else None
+
         self.results['final_results'] = {
             'best_test_accuracy': best_test,
             'final_test_accuracy': final_test,
@@ -2213,6 +2479,13 @@ class SynFlowExperiment:
             'pruning_time_seconds': prune_time,
             'training_time_seconds': train_time,
             'total_time_seconds': total_time,
+            'flops_reduction': flops_reduction,
+            'dense_flops': dense_flops,
+            'pruned_flops': pruned_flops,
+            'dense_latency_ms': dense_latency_ms,
+            'pruned_latency_ms': pruned_latency_ms,
+            'dense_throughput': dense_throughput,
+            'pruned_throughput': pruned_throughput,
         }
 
         print(f"\n✓ Done — best test acc: {best_test:.2f}%, "
@@ -2245,9 +2518,14 @@ class SynFlowExperiment:
         self._save_summary_csv(result_dir / "summary.csv")
 
         # Checkpoints
+        # Save final model
         torch.save(model.state_dict(), result_dir / "final_model.pt")
+        # Save final masks with new name
         masks_torch = {k: torch.from_numpy(v) for k, v in masks.items()}
-        torch.save(masks_torch, result_dir / "masks.pt")
+        torch.save(masks_torch, result_dir / "final_masks.pt")
+        # Save initial model if available
+        if hasattr(self, "initial_state_dict") and self.initial_state_dict is not None:
+            torch.save(self.initial_state_dict, result_dir / "initial_model.pt")
 
         print(f"Results saved to: {result_dir}")
 
