@@ -8,10 +8,10 @@ import os
 
 def get_dataset(dataset_name, train=True, download=True, data_dir='./data'):
     """
-    Get CIFAR dataset.
+    Get dataset (CIFAR-10, CIFAR-100, or MNIST).
 
     Args:
-        dataset_name (str): 'cifar10' or 'cifar100'
+        dataset_name (str): 'cifar10', 'cifar100', or 'mnist'
         train (bool): If True, return training set; else test set
         download (bool): Whether to download the dataset
         data_dir (str): Directory to store the dataset
@@ -19,27 +19,53 @@ def get_dataset(dataset_name, train=True, download=True, data_dir='./data'):
     Returns:
         torchvision dataset
     """
-    if dataset_name.lower() == 'cifar10':
+    dataset = dataset_name.lower()
+    if dataset == 'cifar10':
         dataset_class = torchvision.datasets.CIFAR10
-    elif dataset_name.lower() == 'cifar100':
-        dataset_class = torchvision.datasets.CIFAR100
-    else:
-        raise ValueError(f"Unsupported dataset: {dataset_name}")
-
-    # Define transforms
-    if train:
-        transform = transforms.Compose([
+        mean = (0.4914, 0.4822, 0.4465)
+        std = (0.2023, 0.1994, 0.2010)
+        train_transform = transforms.Compose([
             transforms.RandomCrop(32, padding=4),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+            transforms.Normalize(mean, std),
+        ])
+        test_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ])
+    elif dataset == 'cifar100':
+        dataset_class = torchvision.datasets.CIFAR100
+        mean = (0.5071, 0.4867, 0.4408)
+        std = (0.2675, 0.2565, 0.2761)
+        train_transform = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ])
+        test_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ])
+    elif dataset == 'mnist':
+        dataset_class = torchvision.datasets.MNIST
+        mean = (0.1307,)
+        std = (0.3081,)
+        # For MNIST, keep augmentation minimal (random crop for train)
+        train_transform = transforms.Compose([
+            transforms.RandomCrop(28, padding=4),
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ])
+        test_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
         ])
     else:
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-        ])
+        raise ValueError(f"Unsupported dataset: {dataset_name}")
 
+    transform = train_transform if train else test_transform
     return dataset_class(root=data_dir, train=train, download=download, transform=transform)
 
 def get_dataloaders(
@@ -52,18 +78,16 @@ def get_dataloaders(
     persistent_workers: bool = False,
 ):
     """
-    Get train, validation, and test data loaders for CIFAR datasets.
+    Get train, validation, and test data loaders for CIFAR-10, CIFAR-100, or MNIST datasets.
 
     Args:
-        dataset_name (str): 'cifar10' or 'cifar100'
+        dataset_name (str): 'cifar10', 'cifar100', or 'mnist'
         batch_size (int): Batch size for loaders
         num_workers (int): Number of workers for data loading
         val_split (float): Fraction of training data to use for validation
         data_dir (str): Directory to store the dataset
-        pin_memory (bool): Enable pinned (page-locked) memory for faster
-            CPU→GPU transfers when using CUDA.
-        persistent_workers (bool): Keep workers alive between epochs to avoid
-            re-spawn overhead (requires num_workers > 0).
+        pin_memory (bool): Enable pinned (page-locked) memory for faster CPU→GPU transfers when using CUDA.
+        persistent_workers (bool): Keep workers alive between epochs to avoid re-spawn overhead (requires num_workers > 0).
 
     Returns:
         dict: {'train': train_loader, 'val': val_loader, 'test': test_loader}
