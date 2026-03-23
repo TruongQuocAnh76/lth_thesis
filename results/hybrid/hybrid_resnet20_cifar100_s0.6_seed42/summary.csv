@@ -1,0 +1,6 @@
+step,label,prune_ratio,sparsity_after_prune,finetune_epochs_run,finetune_max_epochs,finetune_patience,best_test_acc,final_test_acc
+0,one-shot,0.4200,0.4200,200,200,200,64.10,64.10
+1,iter-1,0.1000,0.4780,10,10,10,63.92,63.92
+2,iter-2,0.1000,0.5302,10,10,10,63.52,63.52
+3,iter-3,0.1000,0.5772,10,10,10,63.50,63.50
+4,iter-4,0.0540,0.6000,10,10,10,63.16,63.16
