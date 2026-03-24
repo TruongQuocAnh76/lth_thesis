@@ -848,6 +848,9 @@ class EarlyBirdExperiment:
         # Convert channel mask to Conv weight mask
         weight_mask = expand_channel_mask_to_conv_weights(channel_mask, model)
         channel_sparsity = get_overall_channel_sparsity(channel_mask)
+        # Store masks as attributes for later use
+        self.weight_mask = weight_mask
+        self.channel_mask = channel_mask
         
         print(f"\n{'='*60}")
         print("Search Phase Complete")

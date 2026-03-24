@@ -1,3 +1,5 @@
+from sklearn.datasets import make_moons
+from torch.utils.data import TensorDataset
 import torch
 import torchvision
 import torchvision.transforms as transforms
@@ -62,6 +64,18 @@ def get_dataset(dataset_name, train=True, download=True, data_dir='./data'):
             transforms.ToTensor(),
             transforms.Normalize(mean, std),
         ])
+    elif dataset == 'moons':
+        # Use sklearn make_moons for a tiny synthetic dataset
+        n_samples = 100 if train else 40
+        X, y = make_moons(n_samples=n_samples, noise=0.1, random_state=42 if train else 43)
+        X = torch.tensor(X, dtype=torch.float32)
+        y = torch.tensor(y, dtype=torch.long)
+        # Expand to 3 channels, 32x32 for compatibility
+        X_img = torch.zeros((n_samples, 3, 32, 32), dtype=torch.float32)
+        # Place moons data in top-left 2x2 pixels of channel 0
+        X_img[:, 0, 0, 0] = X[:, 0]
+        X_img[:, 0, 0, 1] = X[:, 1]
+        return TensorDataset(X_img, y)
     else:
         raise ValueError(f"Unsupported dataset: {dataset_name}")
 
@@ -97,6 +111,17 @@ def get_dataloaders(
 
     is_distributed = dist.is_initialized()
     rank = dist.get_rank() if is_distributed else 0
+
+
+    # Special case: moons dataset is always local, no download, no split
+    if dataset_name.lower() == 'moons':
+        train_dataset = get_dataset('moons', train=True)
+        test_dataset = get_dataset('moons', train=False)
+        val_dataset = get_dataset('moons', train=False)  # reuse test set for val
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+        return {'train': train_loader, 'val': val_loader, 'test': test_loader}
 
     # Only rank 0 downloads; all others wait at the barrier
     if rank == 0:

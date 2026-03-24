@@ -815,7 +815,6 @@ def hybrid_pruning(
     dense_model.eval()
     if profile is not None:
         dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
-    import time as _time
     def measure_latency(model, x, num_runs=30, warmup=10):
         with torch.no_grad():
             for _ in range(warmup):
