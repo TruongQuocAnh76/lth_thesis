@@ -3570,7 +3570,7 @@ Examples:
             kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 5e-4
             
         elif args.algorithm == "earlybird":
-            kwargs['target_sparsity'] = args.target_sparsity if args.target_sparsity != 0.9 else 0.5
+            kwargs['target_sparsity'] = args.target_sparsity
             kwargs['search_epochs'] = args.search_epochs
             kwargs['finetune_epochs'] = args.finetune_epochs
             kwargs['l1_coef'] = args.l1_coef
@@ -3580,18 +3580,6 @@ Examples:
             kwargs['batch_size'] = args.batch_size if args.batch_size else 256
             kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 1e-4
             
-        elif args.algorithm == "earlybird_resnet":
-            kwargs['target_sparsity'] = args.target_sparsity if args.target_sparsity != 0.9 else 0.5
-            kwargs['total_epochs'] = args.total_epochs
-            kwargs['lr_milestones'] = args.lr_milestones
-            kwargs['lr_gamma'] = args.lr_gamma
-            kwargs['l1_coef'] = args.l1_coef
-            kwargs['distance_threshold'] = args.distance_threshold
-            kwargs['patience'] = args.patience
-            kwargs['pruning_method'] = args.pruning_method
-            kwargs['batch_size'] = args.batch_size if args.batch_size else 128
-            kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 1e-4
-
         elif args.algorithm == "grasp":
             kwargs['target_sparsity'] = args.target_sparsity
             kwargs['epochs'] = args.epochs
