@@ -1,0 +1,7 @@
+Phase,Metric,Value
+Search,Converged,True
+Search,Convergence Epoch,5
+Search,Final Test Acc,90.50
+Search,Channel Sparsity,0.9005
+Finetune,Final Test Acc,68.93
+Finetune,Final Test Loss,0.8708

@@ -320,7 +320,13 @@ class IMPExperiment:
         dense_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
         dense_model.eval()
         if profile is not None:
-            dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
+            try:
+                dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
+            except Exception as e:
+                print(f"Warning: Failed to compute dense FLOPS: {e}")
+                dense_flops = None
+        else:
+            print("Warning: thop not installed, FLOPS calculation skipped")
         # Latency (warmup + timing)
         import time as _time
         def measure_latency(model, x, num_runs=30, warmup=10):
@@ -346,7 +352,13 @@ class IMPExperiment:
         apply_masks_to_model(pruned_model, masks)
         pruned_model.eval()
         if profile is not None:
-            pruned_flops, _ = profile(pruned_model, inputs=(dummy_input,), verbose=False)
+            try:
+                pruned_flops, _ = profile(pruned_model, inputs=(dummy_input,), verbose=False)
+            except Exception as e:
+                print(f"Warning: Failed to compute pruned FLOPS: {e}")
+                pruned_flops = None
+        else:
+            print("Warning: thop not installed, skipping pruned FLOPS calculation")
         pruned_latency_ms, pruned_throughput = measure_latency(pruned_model, dummy_input)
 
         if dense_flops and pruned_flops:
@@ -948,7 +960,13 @@ class EarlyBirdExperiment:
         dense_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
         dense_model.eval()
         if profile is not None:
-            dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
+            try:
+                dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
+            except Exception as e:
+                print(f"Warning: Failed to compute dense FLOPS: {e}")
+                dense_flops = None
+        else:
+            print("Warning: thop not installed, FLOPS calculation skipped")
         import time as _time
         def measure_latency(model, x, num_runs=30, warmup=10):
             with torch.no_grad():
@@ -973,7 +991,13 @@ class EarlyBirdExperiment:
         apply_masks_to_model(pruned_model, self.weight_mask)
         pruned_model.eval()
         if profile is not None:
-            pruned_flops, _ = profile(pruned_model, inputs=(dummy_input,), verbose=False)
+            try:
+                pruned_flops, _ = profile(pruned_model, inputs=(dummy_input,), verbose=False)
+            except Exception as e:
+                print(f"Warning: Failed to compute pruned FLOPS: {e}")
+                pruned_flops = None
+        else:
+            print("Warning: thop not installed, skipping pruned FLOPS calculation")
         pruned_latency_ms, pruned_throughput = measure_latency(pruned_model, dummy_input)
 
         if dense_flops and pruned_flops:
@@ -1392,7 +1416,13 @@ class GraSPExperiment:
         dense_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
         dense_model.eval()
         if profile is not None:
-            dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
+            try:
+                dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
+            except Exception as e:
+                print(f"Warning: Failed to compute dense FLOPS: {e}")
+                dense_flops = None
+        else:
+            print("Warning: thop not installed, FLOPS calculation skipped")
         import time as _time
         def measure_latency(model, x, num_runs=30, warmup=10):
             with torch.no_grad():
@@ -1417,7 +1447,13 @@ class GraSPExperiment:
         apply_masks_to_model(pruned_model, masks)
         pruned_model.eval()
         if profile is not None:
-            pruned_flops, _ = profile(pruned_model, inputs=(dummy_input,), verbose=False)
+            try:
+                pruned_flops, _ = profile(pruned_model, inputs=(dummy_input,), verbose=False)
+            except Exception as e:
+                print(f"Warning: Failed to compute pruned FLOPS: {e}")
+                pruned_flops = None
+        else:
+            print("Warning: thop not installed, skipping pruned FLOPS calculation")
         pruned_latency_ms, pruned_throughput = measure_latency(pruned_model, dummy_input)
 
         if dense_flops and pruned_flops:
@@ -2445,7 +2481,13 @@ class SynFlowExperiment:
         dense_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
         dense_model.eval()
         if profile is not None:
-            dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
+            try:
+                dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
+            except Exception as e:
+                print(f"Warning: Failed to compute dense FLOPS: {e}")
+                dense_flops = None
+        else:
+            print("Warning: thop not installed, FLOPS calculation skipped")
         import time as _time
         def measure_latency(model, x, num_runs=30, warmup=10):
             with torch.no_grad():
@@ -2470,7 +2512,13 @@ class SynFlowExperiment:
         apply_synflow_masks(pruned_model, masks)
         pruned_model.eval()
         if profile is not None:
-            pruned_flops, _ = profile(pruned_model, inputs=(dummy_input,), verbose=False)
+            try:
+                pruned_flops, _ = profile(pruned_model, inputs=(dummy_input,), verbose=False)
+            except Exception as e:
+                print(f"Warning: Failed to compute pruned FLOPS: {e}")
+                pruned_flops = None
+        else:
+            print("Warning: thop not installed, skipping pruned FLOPS calculation")
         pruned_latency_ms, pruned_throughput = measure_latency(pruned_model, dummy_input)
 
         if dense_flops and pruned_flops:
