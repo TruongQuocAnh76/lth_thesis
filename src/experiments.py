@@ -27,6 +27,7 @@ if str(ROOT_DIR) not in sys.path:
 from src.model import get_model, count_parameters
 from src.data import get_dataloaders
 from src.train import train_epochs, evaluate
+from src.metrics import compute_efficiency_metrics
 from src.pruning import (
     create_initial_masks,
     prune_by_percent,
@@ -298,71 +299,15 @@ class IMPExperiment:
         initial_test_accuracy = self.results['iterations'][0]['test_accuracy']
         accuracy_at_target_sparsity = self.results['iterations'][-1]['test_accuracy']
 
-        # Compute FLOPS and latency metrics
-        try:
-            from thop import profile
-        except ImportError:
-            profile = None
-
-        flops_reduction = None
-        dense_flops = None
-        pruned_flops = None
-        dense_latency_ms = None
-        pruned_latency_ms = None
-        dense_throughput = None
-        pruned_throughput = None
-
-        # Prepare dummy input for CIFAR (3,32,32)
-        dummy_input = torch.randn(1, 3, 32, 32, device=self.device)
-        model.eval()
-
-        # Compute dense FLOPS and latency
-        dense_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
-        dense_model.eval()
-        if profile is not None:
-            try:
-                dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
-            except Exception as e:
-                print(f"Warning: Failed to compute dense FLOPS: {e}")
-                dense_flops = None
-        else:
-            print("Warning: thop not installed, FLOPS calculation skipped")
-        # Latency (warmup + timing)
-        import time as _time
-        def measure_latency(model, x, num_runs=30, warmup=10):
-            with torch.no_grad():
-                for _ in range(warmup):
-                    _ = model(x)
-                if self.device.type == 'cuda':
-                    torch.cuda.synchronize()
-                start = _time.perf_counter()
-                for _ in range(num_runs):
-                    _ = model(x)
-                if self.device.type == 'cuda':
-                    torch.cuda.synchronize()
-                end = _time.perf_counter()
-            latency_ms = (end - start) * 1000 / num_runs
-            throughput = 1.0 / ((end - start) / num_runs)
-            return latency_ms, throughput
-        dense_latency_ms, dense_throughput = measure_latency(dense_model, dummy_input)
-
-        # Compute pruned FLOPS and latency (after applying final mask)
-        pruned_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
-        pruned_model.load_state_dict(copy.deepcopy(model.state_dict()))
-        apply_masks_to_model(pruned_model, masks)
-        pruned_model.eval()
-        if profile is not None:
-            try:
-                pruned_flops, _ = profile(pruned_model, inputs=(dummy_input,), verbose=False)
-            except Exception as e:
-                print(f"Warning: Failed to compute pruned FLOPS: {e}")
-                pruned_flops = None
-        else:
-            print("Warning: thop not installed, skipping pruned FLOPS calculation")
-        pruned_latency_ms, pruned_throughput = measure_latency(pruned_model, dummy_input)
-
-        if dense_flops and pruned_flops:
-            flops_reduction = float(dense_flops) / float(pruned_flops) if pruned_flops > 0 else None
+        efficiency_metrics = compute_efficiency_metrics(
+            model_name=self.model_name,
+            num_classes=self.num_classes,
+            dataset_name=self.dataset_name,
+            device=self.device,
+            final_state_dict=model.state_dict(),
+            masks=masks,
+            mask_applier=apply_masks_to_model,
+        )
 
         # Training computational cost
         overall_end_time = time.time()
@@ -373,14 +318,8 @@ class IMPExperiment:
             'final_test_accuracy': final_test_accuracy,
             'initial_test_accuracy': initial_test_accuracy,
             'accuracy_at_target_sparsity': accuracy_at_target_sparsity,
-            'flops_reduction': flops_reduction,
-            'dense_flops': dense_flops,
-            'pruned_flops': pruned_flops,
-            'dense_latency_ms': dense_latency_ms,
-            'pruned_latency_ms': pruned_latency_ms,
-            'dense_throughput': dense_throughput,
-            'pruned_throughput': pruned_throughput,
             'training_computational_cost_seconds': total_training_seconds,
+            **efficiency_metrics,
         }
 
         # Store final model state and masks for saving
@@ -939,69 +878,15 @@ class EarlyBirdExperiment:
             'channel_sparsities': {k: float(1 - m.mean()) for k, m in channel_mask.items()}
         }
         
-        # Compute FLOPS and latency metrics
-        try:
-            from thop import profile
-        except ImportError:
-            profile = None
-
-        flops_reduction = None
-        dense_flops = None
-        pruned_flops = None
-        dense_latency_ms = None
-        pruned_latency_ms = None
-        dense_throughput = None
-        pruned_throughput = None
-
-        dummy_input = torch.randn(1, 3, 32, 32, device=self.device)
-        model.eval()
-
-        # Compute dense FLOPS and latency
-        dense_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
-        dense_model.eval()
-        if profile is not None:
-            try:
-                dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
-            except Exception as e:
-                print(f"Warning: Failed to compute dense FLOPS: {e}")
-                dense_flops = None
-        else:
-            print("Warning: thop not installed, FLOPS calculation skipped")
-        import time as _time
-        def measure_latency(model, x, num_runs=30, warmup=10):
-            with torch.no_grad():
-                for _ in range(warmup):
-                    _ = model(x)
-                if self.device.type == 'cuda':
-                    torch.cuda.synchronize()
-                start = _time.perf_counter()
-                for _ in range(num_runs):
-                    _ = model(x)
-                if self.device.type == 'cuda':
-                    torch.cuda.synchronize()
-                end = _time.perf_counter()
-            latency_ms = (end - start) * 1000 / num_runs
-            throughput = 1.0 / ((end - start) / num_runs)
-            return latency_ms, throughput
-        dense_latency_ms, dense_throughput = measure_latency(dense_model, dummy_input)
-
-        # Compute pruned FLOPS and latency (after applying final mask)
-        pruned_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
-        pruned_model.load_state_dict(copy.deepcopy(model.state_dict()))
-        apply_masks_to_model(pruned_model, self.weight_mask)
-        pruned_model.eval()
-        if profile is not None:
-            try:
-                pruned_flops, _ = profile(pruned_model, inputs=(dummy_input,), verbose=False)
-            except Exception as e:
-                print(f"Warning: Failed to compute pruned FLOPS: {e}")
-                pruned_flops = None
-        else:
-            print("Warning: thop not installed, skipping pruned FLOPS calculation")
-        pruned_latency_ms, pruned_throughput = measure_latency(pruned_model, dummy_input)
-
-        if dense_flops and pruned_flops:
-            flops_reduction = float(dense_flops) / float(pruned_flops) if pruned_flops > 0 else None
+        efficiency_metrics = compute_efficiency_metrics(
+            model_name=self.model_name,
+            num_classes=self.num_classes,
+            dataset_name=self.dataset_name,
+            device=self.device,
+            final_state_dict=model.state_dict(),
+            masks=self.weight_mask,
+            mask_applier=apply_masks_to_model,
+        )
 
         overall_end_time = time.time()
         total_training_seconds = overall_end_time - overall_start_time
@@ -1017,14 +902,8 @@ class EarlyBirdExperiment:
                 search_results['convergence_epoch'] / self.search_epochs
                 if search_results['converged'] else 1.0
             ),
-            'flops_reduction': flops_reduction,
-            'dense_flops': dense_flops,
-            'pruned_flops': pruned_flops,
-            'dense_latency_ms': dense_latency_ms,
-            'pruned_latency_ms': pruned_latency_ms,
-            'dense_throughput': dense_throughput,
-            'pruned_throughput': pruned_throughput,
             'training_computational_cost_seconds': total_training_seconds,
+            **efficiency_metrics,
         }
         
         # Store final model and masks
@@ -1395,69 +1274,15 @@ class GraSPExperiment:
             'test_losses': history['test_losses'],
             'test_accs': history['test_accs'],
         }
-        # Compute FLOPS and latency metrics
-        try:
-            from thop import profile
-        except ImportError:
-            profile = None
-
-        flops_reduction = None
-        dense_flops = None
-        pruned_flops = None
-        dense_latency_ms = None
-        pruned_latency_ms = None
-        dense_throughput = None
-        pruned_throughput = None
-
-        dummy_input = torch.randn(1, 3, 32, 32, device=self.device)
-        model.eval()
-
-        # Compute dense FLOPS and latency
-        dense_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
-        dense_model.eval()
-        if profile is not None:
-            try:
-                dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
-            except Exception as e:
-                print(f"Warning: Failed to compute dense FLOPS: {e}")
-                dense_flops = None
-        else:
-            print("Warning: thop not installed, FLOPS calculation skipped")
-        import time as _time
-        def measure_latency(model, x, num_runs=30, warmup=10):
-            with torch.no_grad():
-                for _ in range(warmup):
-                    _ = model(x)
-                if self.device.type == 'cuda':
-                    torch.cuda.synchronize()
-                start = _time.perf_counter()
-                for _ in range(num_runs):
-                    _ = model(x)
-                if self.device.type == 'cuda':
-                    torch.cuda.synchronize()
-                end = _time.perf_counter()
-            latency_ms = (end - start) * 1000 / num_runs
-            throughput = 1.0 / ((end - start) / num_runs)
-            return latency_ms, throughput
-        dense_latency_ms, dense_throughput = measure_latency(dense_model, dummy_input)
-
-        # Compute pruned FLOPS and latency (after applying final mask)
-        pruned_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
-        pruned_model.load_state_dict(copy.deepcopy(model.state_dict()))
-        apply_masks_to_model(pruned_model, masks)
-        pruned_model.eval()
-        if profile is not None:
-            try:
-                pruned_flops, _ = profile(pruned_model, inputs=(dummy_input,), verbose=False)
-            except Exception as e:
-                print(f"Warning: Failed to compute pruned FLOPS: {e}")
-                pruned_flops = None
-        else:
-            print("Warning: thop not installed, skipping pruned FLOPS calculation")
-        pruned_latency_ms, pruned_throughput = measure_latency(pruned_model, dummy_input)
-
-        if dense_flops and pruned_flops:
-            flops_reduction = float(dense_flops) / float(pruned_flops) if pruned_flops > 0 else None
+        efficiency_metrics = compute_efficiency_metrics(
+            model_name=self.model_name,
+            num_classes=self.num_classes,
+            dataset_name=self.dataset_name,
+            device=self.device,
+            final_state_dict=model.state_dict(),
+            masks=masks,
+            mask_applier=apply_masks_to_model,
+        )
 
         overall_end_time = time.time()
         total_training_seconds = overall_end_time - overall_start_time
@@ -1466,14 +1291,8 @@ class GraSPExperiment:
             'best_test_accuracy': best_test,
             'final_test_accuracy': final_test,
             'overall_sparsity': layer_sp['overall'],
-            'flops_reduction': flops_reduction,
-            'dense_flops': dense_flops,
-            'pruned_flops': pruned_flops,
-            'dense_latency_ms': dense_latency_ms,
-            'pruned_latency_ms': pruned_latency_ms,
-            'dense_throughput': dense_throughput,
-            'pruned_throughput': pruned_throughput,
             'training_computational_cost_seconds': total_training_seconds,
+            **efficiency_metrics,
         }
 
         print(f"\n✓ Done — best test acc: {best_test:.2f}%, "
@@ -2081,6 +1900,15 @@ class GAExperiment:
             'training_time_seconds': train_time,
             'stopped_early': stopped_training,
         }
+        efficiency_metrics = compute_efficiency_metrics(
+            model_name=self.model_name,
+            num_classes=self.num_classes,
+            dataset_name=self.dataset_name,
+            device=self.device,
+            final_state_dict=model.state_dict(),
+            masks=masks,
+            mask_applier=apply_masks_to_model,
+        )
         self.results['final_results'] = {
             'best_test_accuracy': best_test,
             'final_test_accuracy': final_test,
@@ -2090,6 +1918,7 @@ class GAExperiment:
             'total_time_seconds': total_time,
             'total_generations': ga_stats['total_generations'],
             'completed': not stopped_training,
+            **efficiency_metrics,
         }
 
         status = "INTERRUPTED (checkpoint saved)" if stopped_training else "Done"
@@ -2460,69 +2289,15 @@ class SynFlowExperiment:
             'test_accs': history['test_accs'],
             'training_time_seconds': train_time,
         }
-        # Compute FLOPS and latency metrics
-        try:
-            from thop import profile
-        except ImportError:
-            profile = None
-
-        flops_reduction = None
-        dense_flops = None
-        pruned_flops = None
-        dense_latency_ms = None
-        pruned_latency_ms = None
-        dense_throughput = None
-        pruned_throughput = None
-
-        dummy_input = torch.randn(1, 3, 32, 32, device=self.device)
-        model.eval()
-
-        # Compute dense FLOPS and latency
-        dense_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
-        dense_model.eval()
-        if profile is not None:
-            try:
-                dense_flops, _ = profile(dense_model, inputs=(dummy_input,), verbose=False)
-            except Exception as e:
-                print(f"Warning: Failed to compute dense FLOPS: {e}")
-                dense_flops = None
-        else:
-            print("Warning: thop not installed, FLOPS calculation skipped")
-        import time as _time
-        def measure_latency(model, x, num_runs=30, warmup=10):
-            with torch.no_grad():
-                for _ in range(warmup):
-                    _ = model(x)
-                if self.device.type == 'cuda':
-                    torch.cuda.synchronize()
-                start = _time.perf_counter()
-                for _ in range(num_runs):
-                    _ = model(x)
-                if self.device.type == 'cuda':
-                    torch.cuda.synchronize()
-                end = _time.perf_counter()
-            latency_ms = (end - start) * 1000 / num_runs
-            throughput = 1.0 / ((end - start) / num_runs)
-            return latency_ms, throughput
-        dense_latency_ms, dense_throughput = measure_latency(dense_model, dummy_input)
-
-        # Compute pruned FLOPS and latency (after applying final mask)
-        pruned_model = get_model(self.model_name, num_classes=self.num_classes).to(self.device)
-        pruned_model.load_state_dict(copy.deepcopy(model.state_dict()))
-        apply_synflow_masks(pruned_model, masks)
-        pruned_model.eval()
-        if profile is not None:
-            try:
-                pruned_flops, _ = profile(pruned_model, inputs=(dummy_input,), verbose=False)
-            except Exception as e:
-                print(f"Warning: Failed to compute pruned FLOPS: {e}")
-                pruned_flops = None
-        else:
-            print("Warning: thop not installed, skipping pruned FLOPS calculation")
-        pruned_latency_ms, pruned_throughput = measure_latency(pruned_model, dummy_input)
-
-        if dense_flops and pruned_flops:
-            flops_reduction = float(dense_flops) / float(pruned_flops) if pruned_flops > 0 else None
+        efficiency_metrics = compute_efficiency_metrics(
+            model_name=self.model_name,
+            num_classes=self.num_classes,
+            dataset_name=self.dataset_name,
+            device=self.device,
+            final_state_dict=model.state_dict(),
+            masks=masks,
+            mask_applier=apply_synflow_masks,
+        )
 
         self.results['final_results'] = {
             'best_test_accuracy': best_test,
@@ -2532,13 +2307,7 @@ class SynFlowExperiment:
             'pruning_time_seconds': prune_time,
             'training_time_seconds': train_time,
             'total_time_seconds': total_time,
-            'flops_reduction': flops_reduction,
-            'dense_flops': dense_flops,
-            'pruned_flops': pruned_flops,
-            'dense_latency_ms': dense_latency_ms,
-            'pruned_latency_ms': pruned_latency_ms,
-            'dense_throughput': dense_throughput,
-            'pruned_throughput': pruned_throughput,
+            **efficiency_metrics,
         }
 
         print(f"\n✓ Done — best test acc: {best_test:.2f}%, "
