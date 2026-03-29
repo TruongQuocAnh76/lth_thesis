@@ -1,0 +1,50 @@
+\chapter{Nền tảng \& Tổng quan}
+    \section{Giả thuyết vé số may mắn}
+        Giả thuyết vé số may mắn \gls{lth}, được đề ra bởi Frankle và Carbin (2018), cho rằng: "Với 1 mạng neuron dày đặc feed-forward, được khởi tạo ngâu nhiên chứa 1 mạng con "thưa" mà khi huấn luyện 1 cách độc lập khỏi khởi tạo gốc, có độ chính xác tập test cao hơn hoặc bằng mạng gốc với cùng số lần lặp" \cite{article}. Vấn đề lớn nhất mà các bài báo về \gls{lth} nghiên cứu là về thuật toán để tìm ra tờ vé số may mắn này. Bài báo đầu tiên đề xuất ra LTH sử dụng thuật toán \gls{imp}. Phương pháp này dù chính xác nhưng đòi hỏi nhiều tài nguyên tính toán và thời gian. Bài luận này sẽ nghiên cứu và so sánh các phương pháp tìm kiếm vé số, đồng thời cải tiến 1 trong những phương pháp.
+
+    \section{Phân loại thuật toán}
+        Dựa trên các nghiên cứu hiện nay, các thuật toán tìm kiếm vé trúng thưởng có thể được phân nhóm dựa trên thời điểm thực hiện pruning và cơ chế xác định tầm quan trọng của các kết nối neuron.
+
+        \subsection{Nhóm cắt tỉa sau kết nối}
+            Đây là cách tiếp cận nguyên bản của LTH, yêu cầu mô hình phải trải qua quá trình huấn luyện để xác định các trọng số quan trọng.
+
+            \gls{imp}: Là phương pháp nền tảng dùng để xác định các mạng con có khả năng huấn luyện độc lập. Thuật toán thực hiện chu kỳ huấn luyện - cắt tỉa - đặt lại (reset) trọng số về giá trị khởi tạo ban đầu \cite{article}. Mặc dù \gls{imp} đạt hiệu suất cao ở mức độ thưa cực đại, chi phí tính toán của nó rất lớn do phải huấn luyện lại mạng nhiều lần.
+
+        \subsection{Nhóm cắt tỉa giai đoạn sớm}
+            Nhóm này tìm cách khắc phục nhược điểm về chi phí của IMP bằng cách xác định cấu trúc mạng con ngay khi quá trình huấn luyện bắt đầu.
+
+            \gls{eb} Tickets: Thuật toán này phát hiện ra rằng các kết nối neurom quan trọng của mạng nơ-ron thường xuất hiện và ổn định rất sớm trong quá trình huấn luyện. Thay vì huấn luyện đến khi hội tụ, \gls{eb} sử dụng các các phương pháp giảm thời gian huấn luyện như như dừng sớm (early stopping) kết hợp với biến có độ chính xác thấp (low-precision). Sự xuất hiện của vé \gls{eb} được xác định thông qua metric "khoảng cách mặt nạ" (mask distance) giữa các epoch liên tiếp \cite{earlybird}.
+
+        \subsection{Nhóm cắt tỉa tại thời điểm khởi tạo}
+            \begin{itemize}
+                \item \gls{grasp}:  Khác với các phương pháp khác bảo toàn giá trị hàm mất mát, GraSP tập trung vào việc bảo toàn động lực huấn luyện bằng cách giữ lại các trọng số đóng góp nhiều nhất vào chuẩn gradient (gradient norm). Điều này giúp duy trì dòng chảy thông tin qua các lớp mạng ngay cả khi độ thưa (sparsity) rất cao \cite{grasp}.
+                
+                \item \gls{sf}: Đây là thuật toán bất khả tri dữ liệu (data-agnostic), thực hiện cắt tỉa mà không cần nhìn vào dữ liệu huấn luyện. \gls{sf} hoạt động bằng cách bảo toàn tổng dòng chảy của sức mạnh khớp thần kinh xuyên suốt mạng nơ-ron thông qua chỉ số tích các trị tuyệt đối trọng số. Cơ chế lặp lại của \gls{sf} giúp nó đạt được giới hạn nén tối đa mà không gây ra hiện tượng sụp đổ lớp (layer-collapse) \cite{synflow}.
+            \end{itemize}
+
+        \subsection{Nhóm cắt tỉa hỗn hợp}
+            Hybrid Pruning: Một phương pháp cắt tỉa mới trong đó phần lớn các trọng số không quan trọng (khoảng 60-80\%) được loại bỏ trong một bước duy nhất (one-shot), sau đó thực hiện một giai đoạn tinh chỉnh dài hơn. Tiếp theo, các chu kỳ cắt tỉa lặp lại theo cấp số nhân (geometric-like) được áp dụng cho các trọng số còn lại để đạt được độ thưa mục tiêu với độ chính xác tối ưu \cite{hybrid}.
+
+
+\begin{table}[h]
+\centering
+\begin{tabularx}{\textwidth}{
+|>{\centering\arraybackslash}m{2cm}
+|>{\centering\arraybackslash}m{3cm}
+|>{\centering\arraybackslash}m{4cm}
+|>{\raggedright\arraybackslash}X|}
+\hline
+\textbf{Thuật toán} & \textbf{Thời điểm cắt tỉa} & \textbf{Cơ chế xác định tầm quan trọng} & \textbf{Đặc điểm chính} \\ \hline
+
+IMP & Sau huấn luyện & Độ lớn trọng số (Magnitude) & Tiêu chuẩn vàng, chi phí cao \\ \hline
+
+Early-Bird & Giai đoạn sớm & Hệ số tỷ lệ BN (BN Scaling) & Tiết kiệm 5.8x -- 10.7x năng lượng \cite{earlybird} \\ \hline
+
+GraSP & Tại khởi tạo & Tín hiệu Gradient (Hessian-gradient) & Bảo toàn dòng chảy gradient \\ \hline
+
+SynFlow & Tại khởi tạo & Dòng chảy neuron (Synaptic Flow) & Không cần dữ liệu, tránh sụp đổ lớp \\ \hline
+
+Hybrid & Hỗn hợp & Độ lớn lặp lại kết hợp tinh chỉnh & Kết hợp ưu điểm One-shot và Iterative pruning \\ \hline
+\end{tabularx}
+\caption{So sánh các thuật toán cắt tỉa mạng nơ-ron}
+\end{table}

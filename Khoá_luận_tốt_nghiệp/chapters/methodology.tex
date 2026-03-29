@@ -1,0 +1,926 @@
+\chapter{Phương pháp}
+\newtheorem{definition}{Định nghĩa}[chapter]
+\newtheorem{theorem}{Định lý}[chapter]
+    \section{Thuật toán baseline}
+        \subsection{\gls{imp}}
+            \gls{imp} là thuật toán nền tảng được Frankle và Carbin (2019) đề xuất để chứng minh \gls{lth}. \gls{imp} hoạt động dựa trên giả định rằng các trọng số có độ lớn (magnitude) nhỏ nhất là ít quan trọng nhất với hiệu suất mô hình \cite[p~.1]{fisher}. Khác với phương pháp cắt tỉa 1 lần (one-shot pruning), \gls{imp} thực hiện việc loại bỏ trọng số qua nhiều chu kỳ huấn luyện và đặt lại giá trị, giúp "khử nhiễu" quá trình xác định tầm quan trọng của các kết nối neuron.
+
+            Xét một mạng neuron $f(x;\theta)$ với các tham số khởi tạo ban đầu $\theta_0 \sim D_\theta$. Một mạng con được xác định bởi một mặt nạ nhị phân (binary mask) $m \in \{0, 1\}^{|\theta|}$, có cùng kích thước với bộ tham số $\theta$.
+            Mục tiêu của thuật toán \gls{imp} là tìm kiếm mặt nạ $m$ sao cho mạng con $f(x, m \odot \theta_0)$ đạt được hiệu suất tối ưu, trong đó $\odot$ là phép nhân Hadamard. Mặt nạ $m$ tối ưu này thoả mãn các điều kiện:
+            \begin{itemize}
+                \item  Độ thưa: $||m||_0 \ll |\theta|$ - số lượng tham số còn lại rất ít.
+                \item Độ chính xác: $a' \ge a$ - độ chính xác của mạng con không thua kém mạng lớn gốc.
+                \item Tốc độ hội tụ: $j' \le j$ - số vòng lặp để hàm mất mát đạt cực tiểu không lớn hơn mạng gốc.
+            \end{itemize}
+            Ngoài ra, thuật toán này còn áp dụng cơ chế đặt lại (resetting) và late resetting. Sau mỗi vòng cắt tỉa, các trọng số còn sót lại phải được đặt lại (reset) về giá trị khởi tạo ban đầu $\theta_0$ thay vì tiếp tục huấn luyện từ giá trị đã tối ưu. Bước này đã được chứng minh thực nghiệm trong bài báo \gls{lth} gốc \cite[p~.2]{imp}, và được chứng minh một cách rõ ràng hơn trong \cite{deconstructlth}. \\
+            Nghiên cứu này đã giải mã cơ chế đặt lại và phát hiện ra rằng yếu tố then chốt quyết định hiệu suất của một "vé trúng thưởng" không nằm ở giá trị độ lớn cụ thể, mà nằm ở dấu (sign) của trọng số tại thời điểm khởi tạo. Việc đặt lại trọng số về $\theta_0$ đảm bảo các kết nối neuron bắt đầu trong cùng một "góc phần tư dấu" mà chúng đã chiếm giữ tại thời điểm khởi tạo, nơi mà bộ tối ưu hóa (optimizer) có thể dễ dàng điều hướng. Thực nghiệm cho thấy nếu giữ nguyên dấu ban đầu nhưng thay thế giá trị trọng số bằng một hằng số $\pm \alpha$, mạng con vẫn có thể đạt được độ chính xác cao tương đương với việc đặt lại về giá trị $\theta_0$ chính xác. Điều này gợi ý rằng các bộ tối ưu hóa gặp khó khăn khi phải vượt qua "rào cản số không" để đổi dấu trọng số trong quá trình huấn luyện mạng thưa. \\
+            Mặc dù đặt lại về thời điểm $k=0$ hoạt động tốt trên các tập dữ liệu nhỏ như MNIST, cơ chế này thường thất bại khi áp dụng cho các kiến trúc sâu và phức tạp hơn như ResNet-50 hoặc VGG-19 trên ImageNet. Frankle và cộng sự (2019) đã đề xuất kỹ thuật Late Resetting (hoặc Weight Rewinding), trong đó trọng số không được đặt lại về 0 mà về giá trị tại một thời điểm $k$ rất sớm trong quá trình huấn luyện (thường là khoảng 0.1\% đến 7\% tổng thời gian) \cite{imp}. Cơ sở lý thuyết cho hiện tượng này là tính ổn định (stability) \cite{deconstructlth} đối với nhiễu của thuật toán hạ gradient ngẫu nhiên (SGD). Một mạng con được coi là ổn định nếu các phiên bản huấn luyện khác nhau của nó (với các hạt giống ngẫu nhiên khác nhau) đều hội tụ về cùng một lòng chảo (basin) tối ưu \cite{imp}. Việc quay ngược về thời điểm $k > 0$ giúp mạng con vượt qua giai đoạn biến động mạnh lúc ban đầu và đạt được sự kết nối neuron tuyến tính (linear mode connectivity), từ đó đảm bảo hiệu suất không bị suy giảm khi độ thưa tăng cao \cite[sec.~4]{lee2024revisiting}.
+
+            Thuật toán \gls{imp} có thể được biểu diễn như sau:
+
+            \begin{algorithm}[H]
+                \caption{Iterative Magnitude Pruning (IMP)}
+                
+                \KwIn{Network $f(x;\theta)$, target pruning rate $P$, number of rounds $n$}
+                \KwOut{Winning ticket $(\theta_0, m)$}
+                
+                Initialize random parameters $\theta_0$ and mask $m = [1,\dots,1]$\;
+                
+                Store initial parameters $\theta_{\text{orig}} = \theta_0$ 
+                (or $\theta_k$ if using Late Resetting)\;
+                
+                \For{$i = 1$ \KwTo $n$}{
+                    Train subnetwork $f(x; m \odot \theta_0)$ until convergence\;
+                    
+                    Identify $p\%$ weights with smallest magnitude $|\theta|$\;
+                    
+                    Update mask $m$: set selected weight positions to $0$\;
+                    
+                    Reset surviving weights: $\theta_0 = \theta_{\text{orig}} \odot m$\;
+                }
+                
+                \Return{\ensuremath{m, \theta_{\text{orig}}}}
+            
+            \end{algorithm}
+
+        \subsection{\gls{eb}}
+        Thuật toán \textit{Early-Bird Tickets} (EB Tickets), được đề xuất bởi You et al.~\cite{earlybird},
+        xuất phát từ quan sát rằng các "vé số may mắn" không nhất thiết
+        phải chờ đến khi mô hình được huấn luyện hoàn toàn mới xuất hiện.
+        Thay vào đó, cấu trúc kết nối quan trọng của mạng đã hình thành ổn định từ rất sớm trong quá trình
+        huấn luyện, thường chỉ sau $6\%$--$20\%$ tổng số epoch.
+        Dựa trên nhận xét này, EB Tickets đề xuất một chiến lược huấn luyện hiệu quả gồm hai giai đoạn
+        \emph{(i)} xác định sớm mạng con quan trọng bằng các phương án huấn luyện chi phí thấp
+        (learning rate lớn, huấn luyện độ chính xác thấp, kết hợp dừng sớm), và
+        \emph{(ii)} tiếp tục huấn luyện chỉ mạng con đó đến độ chính xác mục tiêu.
+        Kết quả thực nghiệm cho thấy EB Train có thể tiết kiệm tới $5{,}8\times$--$10{,}7\times$ năng lượng
+        huấn luyện trong khi vẫn duy trì độ chính xác tương đương hoặc cao hơn so với huấn luyện toàn mô hình
+        trên các kiến trúc VGG16, PreResNet101, ResNet18/50 và các bộ dữ liệu CIFAR-10/100, ImageNet.
+
+        Cho mạng nơ-ron dày đặc $f(\mathbf{x},\,\symbfit{\theta})$ được khởi tạo ngẫu nhiên, trong đó
+        $\symbfit{\theta} \in \mathbb{R}^{d}$ là tập tham số (trọng số).
+        Huấn luyện mạng bằng Stochastic Gradient Descent (SGD) trên tập huấn luyện $\mathcal{D}$
+        ký hiệu $\symbfit{\theta}^{(t)}$ là trọng số tại epoch thứ $t$.
+        Gọi $T$ là tổng số epoch huấn luyện đầy đủ, và $f_{\mathrm{acc}}$ là độ chính xác kiểm thử
+        đạt được sau $T$ epoch.
+        Với mỗi epoch $t$, ta thực hiện cắt tỉa kênh có cấu trúc (structured channel pruning) theo tỉ lệ
+        $p \in (0,1)$ dựa trên hệ số tỉ lệ (scaling factor) $\mathbf{r}^{(t)}$ trong các lớp Batch
+        Normalization (BN):
+        \[
+            \mathbf{m}^{(t)} \;=\; \mathrm{Prune}_{p}\!\left(\mathbf{r}^{(t)}\right)
+            \;\in\; \{0,1\}^{d},
+        \]
+        trong đó $\mathbf{m}^{(t)}$ là mặt nạ nhị phân, với $m_i^{(t)} = 0$ nếu kênh $i$
+        nằm trong $p\%$ giá trị nhỏ nhất của $\mathbf{r}^{(t)}$, và $m_i^{(t)} = 1$ ngược lại.
+        Mạng con tương ứng được ký hiệu là $f\!\left(\mathbf{x};\,\mathbf{m}^{(t)} \odot \symbfit{\theta}^{(t)}\right)$,
+        trong đó $\odot$ là phép nhân theo từng phần tử (Hadamard product).
+        
+        \paragraph{\textbf{Khoảng cách mask}.}
+        Để đo lường mức độ ổn định của cấu trúc kết nối giữa các epoch liên tiếp, ta định nghĩa
+        \emph{khoảng cách mask} (mask distance) giữa hai epoch $t$ và $t-1$ bằng khoảng cách Hamming
+        chuẩn hoá giữa hai ticket mask:
+        \begin{equation}
+            \delta^{(t)} \;=\; \frac{1}{d}\sum_{i=1}^{d}
+                \mathbf{1}\!\left[m_i^{(t)} \neq m_i^{(t-1)}\right]
+            \;=\; \frac{\left\|\mathbf{m}^{(t)} - \mathbf{m}^{(t-1)}\right\|_1}{d},
+            \label{eq:mask_distance}
+        \end{equation}
+        với $\delta^{(t)} \in [0,1]$; giá trị nhỏ biểu thị cấu trúc kết nối ổn định qua các epoch.
+        
+        \paragraph{\textbf{Điều kiện xuất hiện EB Ticket.}}
+        Gọi $\mathcal{Q}^{(t)} = \left(\delta^{(t-l+1)}, \delta^{(t-l+2)}, \ldots, \delta^{(t)}\right)$
+        là hàng đợi FIFO lưu $l$ khoảng cách mask gần nhất.
+        Một \emph{Early-Bird Ticket} được xác định tại epoch $t^*$ khi:
+        \begin{equation}
+            t^* \;=\; \min\left\{\, t \;\Big|\;
+                \max_{s \in \mathcal{Q}^{(t)}} \delta^{(s)} < \varepsilon \,\right\},
+            \label{eq:eb_condition}
+        \end{equation}
+        trong đó $\varepsilon > 0$ là ngưỡng ổn định (mặc định $\varepsilon = 0.1$) và $l = 5$.
+        Điều kiện~\eqref{eq:eb_condition} yêu cầu $l$ khoảng cách mask liên tiếp \emph{đồng thời}
+        nhỏ hơn $\varepsilon$, tránh trường hợp ổn định giả tạo tại giai đoạn đầu huấn luyện.
+        
+        \paragraph{\textbf{Giả thuyết EB Ticket.}}
+        Tồn tại $t^* \ll T$ và mask $\mathbf{m}^{(t^*)}$ sao cho mạng con
+        $f\!\left(\mathbf{x};\,\mathbf{m}^{(t^*)} \odot \symbfit{\theta}^{(t^*)}\right)$,
+        sau khi được tiếp tục huấn luyện (retrain), đạt độ chính xác $f'_{\mathrm{acc}}$ thoả:
+        \begin{equation}
+            f'_{\mathrm{acc}} \;\gtrsim\; f_{\mathrm{acc}},
+            \qquad \text{với } t^*/T \ll 1 \;\text{ và } \|\mathbf{m}^{(t^*)}\|_0 \ll d.
+            \label{eq:eb_hypothesis}
+        \end{equation}
+        Nói cách khác, EB Ticket vừa \emph{xuất hiện sớm} vừa \emph{thưa}, đảm bảo tiết kiệm cả chi phí
+        tìm kiếm lẫn chi phí huấn luyện lại.
+
+        \begin{algorithm}[H]
+        \DontPrintSemicolon
+        \SetAlgoLined
+        \SetKwInOut{KwIn}{Đầu vào}
+        \SetKwInOut{KwOut}{Đầu ra}
+        \SetKwComment{Comment}{$\triangleright$\ }{}
+        
+        \KwIn{Mạng $f(\mathbf{x};\symbfit{\theta})$; tỉ lệ cắt tỉa $p$;
+            ngưỡng ổn định $\varepsilon$; độ dài hàng đợi $l$; số epoch tối đa $T_{\max}$}
+        \KwOut{Early-Bird Ticket $f\!\left(\mathbf{x};\,\mathbf{m}^{(t^*)} \odot \symbfit{\theta}^{(t^*)}\right)$}
+        
+        \BlankLine
+        Khởi tạo trọng số $\symbfit{\theta}^{(0)}$, hệ số BN $\mathbf{r}^{(0)}$\;
+        Khởi tạo hàng đợi FIFO $\mathcal{Q} \leftarrow \varnothing$ (độ dài tối đa $l$)\;
+        $t \leftarrow 1$\;
+        
+        \BlankLine
+        \While{$t \leq T_{\max}$}{
+            Cập nhật $\symbfit{\theta}^{(t)},\, \mathbf{r}^{(t)}$ bằng một bước SGD trên $\mathcal{D}$\;
+        
+            \BlankLine
+            \Comment{Cắt tỉa có cấu trúc để thu ticket mask}
+            $\mathbf{m}^{(t)} \leftarrow \mathrm{Prune}_{p}\!\left(\mathbf{r}^{(t)}\right)$\;
+        
+            \BlankLine
+            \Comment{Tính khoảng cách mask so với epoch trước}
+            \If{$t > 1$}{
+                $\delta^{(t)} \leftarrow
+                    \dfrac{\left\|\mathbf{m}^{(t)} - \mathbf{m}^{(t-1)}\right\|_1}{d}$\;
+                Thêm $\delta^{(t)}$ vào $\mathcal{Q}$
+                (loại bỏ phần tử cũ nhất nếu $|\mathcal{Q}| > l$)\;
+            }
+        
+            \BlankLine
+            \Comment{Kiểm tra điều kiện xuất hiện EB Ticket}
+            \If{$|\mathcal{Q}| = l$ \textbf{ và } $\max(\mathcal{Q}) < \varepsilon$}{
+                $t^* \leftarrow t$\;
+                \Return \ensuremath{f\!\left(\mathbf{x};\,\mathbf{m}^{(t^*)} \odot \symbfit{\theta}^{(t^*)}\right)}\;
+            }
+        
+            $t \leftarrow t + 1$\;
+        }
+        \Return \ensuremath{f\!\left(\mathbf{x};\,\mathbf{m}^{(T_{\max})} \odot \symbfit{\theta}^{(T_{\max})}\right)}
+        \Comment*[r]{Fallback: trả về mask cuối cùng nếu chưa hội tụ}
+        
+        \caption{Tìm kiếm Early-Bird Ticket (EB Search)}
+        \label{alg:eb_search}
+        \end{algorithm}
+        \bigskip
+        Sau khi EB Ticket được xác định tại epoch $t^*$, giai đoạn huấn luyện lại (retraining) tiếp tục
+        với mạng con $f\!\left(\mathbf{x};\,\mathbf{m}^{(t^*)} \odot \symbfit{\theta}^{(t^*)}\right)$,
+        \emph{kế thừa trọng số} $\symbfit{\theta}^{(t^*)}$ thay vì khởi tạo lại từ đầu.
+        Toàn bộ quy trình EB Train do đó chỉ yêu cầu huấn luyện đầy đủ trong $t^* + (T - t^*)_{\text{retrain}}$
+        epoch, trong đó $t^* \approx 6\%$--$20\% \cdot T$, dẫn đến tiết kiệm đáng kể về tổng chi phí tính toán
+        và năng lượng so với các phương pháp cắt tỉa truyền thống yêu cầu huấn luyện mô hình dày đặc
+        hoàn toàn trước khi cắt tỉa.
+
+        \subsection{\gls{grasp}}
+        GraSP (Gradient Signal Preservation – Bảo toàn tín hiệu gradient) là
+        một thuật toán tỉa mạng trước huấn luyện (\textit{pruning at
+        initialization}) được Wang~et~al.~\cite{grasp} đề xuất nhằm
+        khắc phục hạn chế của tiêu chí \textit{connection sensitivity} trong phương pháp
+        SNIP.
+        Tác giả chỉ ra khi tỉa một phần lớn trọng số, chuẩn gradient của
+        mạng bị suy giảm đáng kể, làm chậm hoặc cản trở quá trình tối ưu hóa về sau.
+        Thay vì bảo toàn giá trị hàm mất mát tại thời điểm khởi tạo—vốn không
+        mang nhiều ý nghĩa vì mạng chưa được huấn luyện—GraSP trực tiếp tìm kiếm
+        mặt nạ tỉa sao cho chuẩn gradient sau khi tỉa bị suy giảm ít nhất có thể.
+
+        Xét mạng nơ-ron $f(\mathbf{x};\symbfit{\theta})$ được tham số hóa bởi
+        $\symbfit{\theta} \in \mathbb{R}^{d}$ với giá trị khởi tạo $\symbfit{\theta}_0$.
+        Cho tập huấn luyện $\mathcal{D} = \{(\mathbf{x}_i, y_i)\}_{i=1}^{N}$
+        và hàm mất mát kinh nghiệm
+        \begin{equation}
+            \mathcal{L}(\symbfit{\theta})
+            = \frac{1}{N}\sum_{i=1}^{N}
+            \ell\!\left(f(\mathbf{x}_i;\symbfit{\theta}),\, y_i\right).
+        \end{equation}
+        Một \emph{mặt nạ tỉa} (pruning mask) là vector nhị phân
+        $\mathbf{m} \in \{0,1\}^{d}$, trong đó $m_q = 0$ chỉ ra rằng trọng số
+        thứ $q$ bị loại bỏ.
+        Bài toán tỉa trước huấn luyện được phát biểu là
+        \begin{equation}
+            \min_{\mathbf{m}\in\{0,1\}^d}
+            \;\mathbb{E}_{(\mathbf{x},y)\sim\mathcal{D}}
+            \!\left[\ell\!\left(f\!\left(\mathbf{x};\,
+                \mathcal{A}(\mathbf{m},\symbfit{\theta}_0)\right), y\right)\right]
+            \quad \text{s.t.} \quad
+            \frac{\|\mathbf{m}\|_0}{d} = 1 - p,
+            \label{eq:foresight_pruning}
+        \end{equation}
+        trong đó $p \in (0,1)$ là \emph{tỷ lệ tỉa} mong muốn và $\mathcal{A}$
+        là thuật toán huấn luyện (ví dụ: SGD).
+
+        \paragraph{Tiêu chí tỉa dựa trên bảo toàn gradient.}
+        Tại điểm khởi tạo $\symbfit{\theta}_0$, mức độ giảm hàm mất mát tại mỗi bước
+        gradient descent được đặc trưng bởi đạo hàm có hướng:
+        \begin{equation}
+            \Delta\mathcal{L}(\symbfit{\theta})
+            = \nabla\mathcal{L}(\symbfit{\theta})^\top \nabla\mathcal{L}(\symbfit{\theta})
+            = \|\nabla\mathcal{L}(\symbfit{\theta})\|^2.
+            \label{eq:gradient_flow}
+        \end{equation}
+        GraSP mô hình hóa thao tác tỉa như một nhiễu loạn
+        $\symbfit{\delta} \in \mathbb{R}^d$ tác động lên $\symbfit{\theta}_0$
+        (trong đó $\delta_q = -\theta_{0,q}$ nếu trọng số $q$ bị tỉa, và
+        $\delta_q = 0$ ngược lại).
+        Sử dụng xấp xỉ Taylor bậc nhất, sự thay đổi của $\Delta\mathcal{L}$
+        sau khi tỉa được ước lượng là:
+        \begin{align}
+            S(\symbfit{\delta})
+            &= \Delta\mathcal{L}(\symbfit{\theta}_0 + \symbfit{\delta})
+            - \Delta\mathcal{L}(\symbfit{\theta}_0) \notag \\
+            &\approx 2\,\symbfit{\delta}^\top
+            \underbrace{\nabla^2\mathcal{L}(\symbfit{\theta}_0)
+                        \,\nabla\mathcal{L}(\symbfit{\theta}_0)}_{=:\,\mathbf{Hg}}
+            + \mathcal{O}(\|\symbfit{\delta}\|_2^2),
+            \label{eq:taylor_approx}
+        \end{align}
+        trong đó $\mathbf{Hg} = \mathbf{H}\mathbf{g}$ là tích vector-Hessian
+        (Hessian-gradient product), $\mathbf{H} = \nabla^2\mathcal{L}(\symbfit{\theta}_0)$
+        và $\mathbf{g} = \nabla\mathcal{L}(\symbfit{\theta}_0)$.
+        Tích $\mathbf{Hg}$ có thể tính hiệu quả mà không cần xây dựng tường minh
+        ma trận Hessian, nhờ phép vi phân tự động bậc hai.
+
+        \paragraph{Điểm quan trọng của từng trọng số.}
+        Thay $\symbfit{\delta} = -\symbfit{\theta}_0$ (tức là tỉa toàn bộ), mỗi thành phần
+        của điểm quan trọng vector hóa được xác định bởi:
+        \begin{equation}
+            \boxed{
+            \mathbf{S}(-\symbfit{\theta}_0)
+            = -\symbfit{\theta}_0 \odot \mathbf{Hg},
+            }
+            \label{eq:grasp_score}
+        \end{equation}
+        trong đó $\odot$ là tích Hadamard (nhân theo từng phần tử).
+        Nếu $S_q(-\theta_{0,q}) < 0$, việc tỉa trọng số $q$ sẽ \emph{làm giảm}
+        luồng gradient; ngược lại nếu $S_q > 0$, việc tỉa sẽ \emph{tăng}
+        luồng gradient.
+        Do đó, \emph{điểm quan trọng càng cao thì trọng số càng ít quan trọng}
+        đối với việc duy trì tốc độ học.
+        
+        \paragraph{\textbf{Xây dựng mặt nạ tỉa.}}
+        Với tỷ lệ tỉa $p$, GraSP loại bỏ $\lfloor p \cdot d \rfloor$ trọng số có
+        điểm quan trọng \emph{cao nhất} (những trọng số mà việc tỉa ít làm hại
+        nhất đến luồng gradient):
+        \begin{equation}
+            \tau = \mathrm{Percentile}\!\left(\mathbf{S}(-\symbfit{\theta}_0),\; p\right),
+            \qquad
+            m_q = \mathbf{1}\!\left[S_q(-\theta_{0,q}) < \tau\right].
+            \label{eq:mask}
+        \end{equation}
+        Mạng con thưa thu được $f(\mathbf{x};\mathbf{m}\odot\symbfit{\theta}_0)$ sau đó
+        được huấn luyện từ đầu trên $\mathcal{D}$.
+
+        \paragraph{\textbf{Tính tích Hessian--gradient}}
+        Thay vì xây dựng tường minh ma trận Hessian $\mathbf{H} \in \mathbb{R}^{d\times d}$
+        (tốn $\mathcal{O}(d^2)$ bộ nhớ), GraSP sử dụng tính toán vi phân tự động bậc hai
+        để thu được $\mathbf{Hg} = \mathbf{H}\mathbf{g}$ với chi phí $\mathcal{O}(d)$.
+        Cụ thể, xét biểu thức vô hướng $\mathbf{g}^\top \mathrm{sg}(\mathbf{g})$
+        trong đó $\mathrm{sg}(\cdot)$ là toán tử \textit{stop-gradient}.
+        Gradient của biểu thức này theo $\symbfit{\theta}$ chính là $\mathbf{Hg}$:
+        \begin{equation}
+            \nabla_{\symbfit{\theta}}
+            \!\left[\mathbf{g}(\symbfit{\theta})^\top
+                    \mathrm{sg}\!\left(\mathbf{g}(\symbfit{\theta})\right)\right]
+            = \mathbf{H}(\symbfit{\theta})\,\mathbf{g}(\symbfit{\theta}) = \mathbf{Hg}.
+            \label{eq:hg_trick}
+        \end{equation}
+        Thủ thuật này cho phép tính $\mathbf{Hg}$ với độ phức tạp tương đương
+        một lần lan truyền ngược bổ sung, không đòi hỏi bộ nhớ thêm cho Hessian.
+        
+        \begin{algorithm}[H]
+        \caption{Tính tích Hessian--gradient ($\mathbf{Hg}$)}
+        \label{alg:hg}
+        \DontPrintSemicolon
+        \SetAlgoLined
+        \KwIn{Mini-batch $\mathcal{D}_b$; mạng $f$ với tham số khởi tạo $\symbfit{\theta}_0$;
+            hàm mất mát $\ell$}
+        \KwOut{Tích Hessian--gradient $\mathbf{Hg} \in \mathbb{R}^d$}
+        \BlankLine
+        Tính mất mát:
+        $\mathcal{L}(\symbfit{\theta}_0)
+        \leftarrow \mathbb{E}_{(\mathbf{x},y)\sim\mathcal{D}_b}
+        \bigl[\ell(f(\mathbf{x};\symbfit{\theta}_0),\, y)\bigr]$\;
+        \BlankLine
+        Tính gradient bậc một:
+        $\mathbf{g} \leftarrow \nabla_{\symbfit{\theta}_0}\mathcal{L}(\symbfit{\theta}_0)$\;
+        \BlankLine
+        Tính tích Hessian--gradient bằng vi phân tự động bậc hai:
+        $\mathbf{Hg} \leftarrow
+        \nabla_{\symbfit{\theta}_0}
+        \!\left[\mathbf{g}^{\top}\,\mathrm{sg}(\mathbf{g})\right]$
+        \tcp*[r]{theo phương trình~\eqref{eq:hg_trick}}
+        \BlankLine
+        \Return $\mathbf{Hg}$\;
+        \end{algorithm}
+
+        Kết hợp bước tính điểm quan trọng \eqref{eq:grasp_score} và xây dựng
+        mặt nạ \eqref{eq:mask}, thuật toán GraSP hoàn chỉnh được trình bày trong
+        Thuật toán~\ref{alg:grasp}.
+        
+        \begin{algorithm}[H]
+        \caption{Bảo toàn tín hiệu gradient (GraSP)}
+        \label{alg:grasp}
+        \DontPrintSemicolon
+        \SetAlgoLined
+        \KwIn{Tỷ lệ tỉa $p\in(0,1)$; tập dữ liệu huấn luyện $\mathcal{D}$;
+            mạng $f$ với tham số khởi tạo $\symbfit{\theta}_0$}
+        \KwOut{Mạng thưa đã huấn luyện $f(\mathbf{x};\mathbf{m}\odot\symbfit{\theta})$}
+        \BlankLine
+        \tcp{Bước 1: Lấy mẫu mini-batch}
+        Lấy ngẫu nhiên một mini-batch
+        $\mathcal{D}_b = \{(\mathbf{x}_i, y_i)\}_{i=1}^{b} \sim \mathcal{D}$\;
+        \BlankLine
+        \tcp{Bước 2: Tính tích Hessian--gradient}
+        $\mathbf{Hg} \leftarrow \textsc{HessianGradientProduct}(\mathcal{D}_b,\,f,\,\symbfit{\theta}_0)$\;
+        \BlankLine
+        \tcp{Bước 3: Tính điểm quan trọng theo pt.~\eqref{eq:grasp_score}}
+        \For{$q = 1, \ldots, d$}{
+            $S_q \leftarrow -\,\theta_{0,q} \cdot (\mathbf{Hg})_q$\;
+        }
+        \BlankLine
+        \tcp{Bước 4: Xác định ngưỡng tỉa}
+        $\tau \leftarrow \mathrm{Percentile}\!\left(\{S_q\}_{q=1}^{d},\; p\right)$\;
+        \BlankLine
+        \tcp{Bước 5: Tạo mặt nạ nhị phân}
+        \For{$q = 1, \ldots, d$}{
+            \uIf{$S_q < \tau$}{
+                $m_q \leftarrow 1$\; \tcp*[r]{Giữ lại trọng số}
+            }
+            \Else{
+                $m_q \leftarrow 0$\; \tcp*[r]{Tỉa trọng số}
+            }
+        }
+        \BlankLine
+        \tcp{Bước 6: Huấn luyện mạng con thưa từ đầu}
+        Huấn luyện $f(\mathbf{x};\mathbf{m}\odot\symbfit{\theta})$ trên $\mathcal{D}$
+        từ khởi tạo $\mathbf{m}\odot\symbfit{\theta}_0$ cho đến hội tụ\;
+        \BlankLine
+        \Return $f(\mathbf{x};\mathbf{m}\odot\symbfit{\theta})$\;
+        \end{algorithm}
+
+        \subsection{Synflow}
+        Xét một mạng nơ-ron truyền thẳng (\emph{feedforward}) $f(\symbfit{x};\symbfit{\theta})$
+        gồm $L$ tầng có trọng số. Ký hiệu $\symbfit{\theta} = \{\symbfit{\theta}^{[l]}\}_{l=1}^{L}$
+        là tập hợp tất cả tham số có thể tỉa, trong đó $\symbfit{\theta}^{[l]} \in
+        \mathbb{R}^{N^{[l]}}$ là véc-tơ tham số của tầng thứ $l$ và
+        $N^{[l]} = |\symbfit{\theta}^{[l]}|$ là số lượng tham số tương ứng. Tổng số
+        tham số của mạng là $N = \sum_{l=1}^{L} N^{[l]}$.
+        
+        \begin{definition}[Tỉ lệ nén {\cite{synflow}}]
+        Tỉ lệ nén $\rho \geq 1$ được định nghĩa là tỉ số giữa số tham số ban đầu và
+        số tham số còn lại sau khi tỉa:
+        \[
+            \rho = \frac{N}{\#\{\text{tham số còn lại}\}}.
+        \]
+        Tỉ lệ nén tối đa khả thi (không gây sụp đổ tầng) là
+        $\rho_{\max} = N/L$, ứng với việc giữ lại đúng một tham số mỗi tầng.
+        \end{definition}
+        
+        \begin{definition}[Mặt nạ tỉa thưa {\cite{synflow}}]
+        Mặt nạ nhị phân $\symbfit{\mu} = \{\symbfit{\mu}^{[l]}\}_{l=1}^{L}$,
+        $\symbfit{\mu}^{[l]} \in \{0,1\}^{N^{[l]}}$, xác định tập tham số được giữ
+        lại. Mạng sau khi tỉa được ký hiệu $f(\symbfit{x};\, \symbfit{\mu} \odot
+        \symbfit{\theta}_0)$, với $\symbfit{\theta}_0$ là giá trị tham số tại khởi tạo
+        và $\odot$ là tích Hadamard.
+        \end{definition}
+        
+        \begin{definition}[Synaptic saliency {\cite{synflow}}]
+        \label{def:saliency}
+        Với hàm mục tiêu vô hướng $\mathcal{R}$ là hàm của đầu ra mạng, điểm
+        \emph{synaptic saliency} của tham số $\theta_i$ được định nghĩa là
+        \begin{equation}
+            \mathcal{S}(\theta_i) = \frac{\partial \mathcal{R}}{\partial \theta_i}
+            \cdot \theta_i.
+            \label{eq:saliency}
+        \end{equation}
+        Đây là tích Hadamard giữa gradient của $\mathcal{R}$ và véc-tơ tham số,
+        tổng quát hóa nhiều tiêu chí điểm quan trọng kinh điển (Skeletonization,
+        SNIP, Taylor-FO, \dots).
+        \end{definition}
+        
+        \subsubsection{Định lý bảo toàn và hệ quả}
+        
+        Nền tảng lý thuyết của SynFlow dựa trên hai định lý bảo toàn sau, chứng minh
+        rằng tổng điểm synaptic saliency được bảo toàn qua từng nơ-ron và toàn mạng
+        \cite{synflow}.
+        
+        \begin{theorem}[Bảo toàn theo nơ-ron {\cite{synflow}}]
+        \label{thm:neuron_conservation}
+        Với mạng truyền thẳng có hàm kích hoạt liên tục và thuần nhất bậc nhất
+        $\phi(x) = \phi'(x)\,x$ (ví dụ: ReLU, Leaky ReLU, tuyến tính), tổng điểm
+        saliency của các tham số \emph{đến} nơ-ron ẩn $j$ bằng tổng điểm saliency
+        của các tham số \emph{đi ra} từ nơ-ron đó:
+        \[
+            \mathcal{S}^{\mathrm{in}}_j
+            \;=\; \left\langle \frac{\partial \mathcal{R}}{\partial \symbfit{\theta}^{\mathrm{in}}_j},\,
+                                \symbfit{\theta}^{\mathrm{in}}_j \right\rangle
+            \;=\; \left\langle \frac{\partial \mathcal{R}}{\partial \symbfit{\theta}^{\mathrm{out}}_j},\,
+                                \symbfit{\theta}^{\mathrm{out}}_j \right\rangle
+            \;=\; \mathcal{S}^{\mathrm{out}}_j.
+        \]
+        \end{theorem}
+        
+        \begin{theorem}[Bảo toàn theo mạng {\cite{synflow}}]
+        \label{thm:network_conservation}
+        Tổng điểm saliency trên bất kỳ tập tham số nào \emph{tách biệt hoàn toàn}
+        các nơ-ron đầu vào $\symbfit{x}$ khỏi các nơ-ron đầu ra $\symbfit{y}$ đều
+        bằng nhau và bằng
+        \[
+            \left\langle \frac{\partial \mathcal{R}}{\partial \symbfit{x}},\,\symbfit{x} \right\rangle
+            = \left\langle \frac{\partial \mathcal{R}}{\partial \symbfit{y}},\,\symbfit{y} \right\rangle.
+        \]
+        \end{theorem}
+        
+        \noindent
+        \textbf{Hệ quả -- Nguyên nhân gây sụp đổ tầng \cite{synflow}.}\;
+        Từ Định lý~\ref{thm:network_conservation}, tổng điểm saliency trên tầng $l$
+        của một mạng fully-connected đơn giản là hằng số với mọi $l$. Do đó, điểm
+        trung bình của tầng tỉ lệ nghịch với kích thước tầng:
+        \[
+        \left\langle \mathcal{S}^{[l]}_i \right\rangle = \frac{C}{N^{[l]}},
+        \]
+        với $C$ là hằng số. Điều này giải thích tại sao các thuật toán tỉa đơn lần
+        (\emph{single-shot}) như SNIP hay GraSP ưu tiên loại bỏ tham số của tầng
+        \emph{lớn nhất}, dẫn đến sụp đổ tầng khi tỉ lệ nén đủ cao \cite{synflow}.
+        
+        \subsubsection{Điểm Synaptic Flow và hàm mục tiêu SynFlow}
+        \label{subsubsec:synflow_score}
+        
+        Để tránh sụp đổ tầng, SynFlow yêu cầu điểm tham số phải (i) \emph{dương},
+        (ii) \emph{bảo toàn theo tầng}, và (iii) được \emph{tính lặp lại}. Ba điều
+        kiện này được đảm bảo bởi hàm mục tiêu không dùng dữ liệu sau \cite{synflow}:
+        
+        \begin{equation}
+        \mathcal{R}_{\mathrm{SF}}(\symbfit{\theta})
+        \;=\; \mathbb{1}^{\top}
+                \left(\prod_{l=1}^{L} |\symbfit{\theta}^{[l]}|\right)
+                \mathbb{1},
+        \label{eq:synflow_loss}
+        \end{equation}
+        trong đó $\mathbb{1}$ là véc-tơ toàn số $1$ có kích thước phù hợp,
+        $|\cdot|$ lấy giá trị tuyệt đối theo từng phần tử, và tích là tích ma trận
+        qua các tầng. Đây chính là \emph{$\ell_1$-path norm} của mạng.
+        
+        Thay \eqref{eq:synflow_loss} vào \eqref{eq:saliency}, ta thu được
+        \emph{điểm Synaptic Flow} của tham số $w^{[l]}_{ij}$ \cite{synflow}:
+        
+        \begin{equation}
+        \mathcal{S}_{\mathrm{SF}}\!\left(w^{[l]}_{ij}\right)
+        = \left[\mathbb{1}^{\top}
+                \prod_{k=l+1}^{N}\!\left|W^{[k]}\right|\right]_{\!i}
+            \cdot\, \left|w^{[l]}_{ij}\right|
+            \cdot \left[\prod_{k=1}^{l-1}\!\left|W^{[k]}\right|\,\mathbb{1}\right]_{\!j}.
+        \label{eq:synflow_score}
+        \end{equation}
+        
+        Biểu thức \eqref{eq:synflow_score} cho thấy điểm SynFlow là tổng tích các
+        trọng số tuyệt đối dọc theo mọi đường đi từ đầu vào đến đầu ra mà đi qua
+        $w^{[l]}_{ij}$, tổng quát hóa điểm độ lớn đơn thuần $|w^{[l]}_{ij}|$ bằng
+        cách tính đến sự tương tác liên tầng \cite{synflow} 
+        \subsubsection{Điều kiện đủ để đạt Nén Tới Hạn Cực Đại}
+        
+        \begin{theorem}[Tỉa lặp với điểm dương và bảo toàn đạt Nén Tới Hạn Cực Đại]
+        \label{thm:mcc}
+        Nếu một thuật toán tỉa với global masking gán điểm \emph{dương} thỏa mãn
+        bảo toàn theo tầng, đồng thời \emph{lượng tỉa} (\emph{prune size}) tại mỗi
+        vòng lặp luôn nhỏ hơn nghiêm ngặt so với \emph{kích thước cắt} (\emph{cut
+        size}) -- tức tổng điểm của cả một tầng -- khi điều này khả thi, thì thuật
+        toán đó thỏa mãn tiên đề Nén Tới Hạn Cực Đại {\cite{synflow}}.
+        \end{theorem}
+        
+        \noindent
+        Bộ ba điều kiện của Định lý~\ref{thm:mcc} -- điểm dương, bảo toàn, và tính
+        lặp -- được SynFlow đáp ứng đồng thời qua hàm mục tiêu \eqref{eq:synflow_loss}
+        kết hợp với lịch trình nén theo hàm mũ $\rho_k = \rho^{k/n}$, với $n$ là tổng
+        số vòng lặp tỉa.
+
+        \begin{algorithm}[H]
+        \caption{Iterative Synaptic Flow Pruning -- SynFlow \cite{synflow}}
+        \label{alg:synflow}
+        \DontPrintSemicolon
+        \SetAlgoLined
+        \SetKwInOut{Input}{Đầu vào}
+        \SetKwInOut{Output}{Đầu ra}
+        \SetKwComment{Comment}{$\triangleright$\ }{}
+        
+        \Input{Mạng $f(\symbfit{x};\symbfit{\theta}_0)$; tỉ lệ nén $\rho$; số vòng lặp $n$}
+        \Output{Mạng tỉa thưa $f\!\left(\symbfit{x};\,\symbfit{\mu}\odot\symbfit{\theta}_0\right)$}
+        
+        \BlankLine
+        Chuyển mạng sang chế độ \texttt{eval} (vô hiệu hóa Batch Normalization)\;
+        Khởi tạo mặt nạ $\symbfit{\mu} \leftarrow \mathbb{1}$ \Comment*[r]{giữ lại toàn bộ tham số}
+        
+        \BlankLine
+        \For{$k = 1, 2, \ldots, n$}{
+            $\symbfit{\theta}_{\symbfit{\mu}} \leftarrow \symbfit{\mu} \odot \symbfit{\theta}_0$
+            \Comment*[r]{che tham số đã tỉa}
+        
+            \BlankLine
+            \Comment{Tính hàm mục tiêu SynFlow (không cần dữ liệu)}
+            $\mathcal{R} \leftarrow
+            \mathbb{1}^{\top}\!\left(\displaystyle\prod_{l=1}^{L}
+            |\symbfit{\theta}^{[l]}_{\symbfit{\mu}}|\right)\!\mathbb{1}$\;
+        
+            \BlankLine
+            \Comment{Tính điểm Synaptic Flow qua lan truyền ngược}
+            $\symbfit{S} \leftarrow
+            \dfrac{\partial \mathcal{R}}{\partial \symbfit{\theta}_{\symbfit{\mu}}}
+            \odot \symbfit{\theta}_{\symbfit{\mu}}$\;
+        
+            \BlankLine
+            \Comment{Xác định ngưỡng theo lịch trình nén mũ}
+            $\tau \leftarrow \left(1 - \rho^{-k/n}\right)\text{-percentile}\left(\symbfit{S}\right)$\;
+        
+            \BlankLine
+            \Comment{Cập nhật mặt nạ: giữ lại các tham số có điểm vượt ngưỡng}
+            $\symbfit{\mu} \leftarrow \mathbf{1}\!\left[\symbfit{S} > \tau\right]$\;
+        }
+        
+        \BlankLine
+        \Return $f\!\left(\symbfit{x};\,\symbfit{\mu}\odot\symbfit{\theta}_0\right)$\;
+        \end{algorithm}
+        
+        \noindent
+        Bởi vì hàm mục tiêu $\mathcal{R}_{\mathrm{SF}}$ là tích các ma trận trọng số
+        tuyệt đối, giá trị của nó có thể tăng hoặc giảm theo hàm mũ của chiều sâu $L$,
+        tiềm ẩn nguy cơ mất ổn định số học với mạng rất sâu. Một biện pháp khắc phục
+        đơn giản là chuẩn hóa từng tầng trước khi tính điểm, hoặc sử dụng dấu phẩy
+        động độ chính xác kép (\texttt{float64}). Trên thực nghiệm, $n = 100$ vòng lặp với lịch trình
+        mũ là đủ để SynFlow đạt Nén Tới Hạn Cực Đại trên tất cả các kiến trúc VGG và
+        ResNet được khảo sát \cite{synflow}.
+
+        \subsection{Hybrid}
+            Các phân tích thực nghiệm trong tài liệu gốc~\cite{hybrid} chỉ ra rằng không có một chiến lược cắt tỉa đơn lẻ nào là tối ưu trong mọi điều kiện: cắt tỉa một lần (\textit{one-shot pruning}) đạt hiệu quả cao hơn ở các tỉ lệ thưa thớt thấp (dưới $80\%$), trong khi cắt tỉa lặp lại (\textit{iterative pruning}) lại vượt trội ở các tỉ lệ thưa thớt cao hơn.
+            Từ quan sát này, phương pháp \textbf{cắt tỉa lai} (\textit{hybrid few-shot pruning}) được đề xuất như một chiến lược kết hợp nhằm tận dụng ưu điểm của cả hai phương pháp.
+            Ý tưởng cốt lõi là loại bỏ phần lớn trọng số không cần thiết trong một bước lớn duy nhất giống one-shot, sau đó tinh chỉnh lại cấu trúc còn lại qua một chuỗi các bước lặp hình học nhỏ hơn.
+            Cách tiếp cận này vừa tránh được chi phí tính toán lặp lại của iterative pruning ở giai đoạn đầu, vừa bảo toàn độ chính xác nhờ các bước tinh chỉnh dần dần ở giai đoạn sau, khi mà các trọng số còn lại ngày càng trở nên quan trọng hơn.
+
+            Cho một mạng nơ-ron $f(x,;\symbfit{\theta})$ với tập trọng số
+            $\symbfit{\theta} \in \mathbb{R}^{W}$, trong đó $W$ là tổng số tham số có thể huấn luyện.
+            Quá trình cắt tỉa được điều khiển bởi một \textbf{mặt nạ nhị phân}
+            (binary mask)
+            $\symbfit{m} \in \{0,1\}^{W}$,
+            trong đó $m_i = 0$ biểu thị tham số $\theta_i$ đã bị loại bỏ.
+            Số lượng tham số còn lại sau khi áp dụng mặt nạ là
+            $\|\symbfit{m}\|_0 = \sum_{i=1}^{W} m_i$.
+            Tỉ lệ thưa thớt (\textit{sparsity}) tại thời điểm bất kỳ được định nghĩa là:
+            
+            \begin{equation}
+                s(\symbfit{m}) \;=\; 1 - \frac{\|\symbfit{m}\|_0}{W}.
+                \label{eq:sparsity}
+            \end{equation}
+            
+            Mục tiêu là đạt được tỉ lệ thưa thớt mục tiêu $p \in (0,1)$, tức là
+            $s(\symbfit{m}^*) = p$, đồng thời duy trì độ chính xác của mô hình ở mức cao nhất có thể.
+
+            \paragraph{Tiêu chí quan trọng theo độ lớn (magnitude criterion).}
+            Tại mỗi bước cắt tỉa, tầm quan trọng của tham số $\theta_i$ được ước lượng bằng giá trị tuyệt đối của nó:
+            \begin{equation}
+                \text{score}(\theta_i) \;=\; |\theta_i|.
+                \label{eq:magnitude}
+            \end{equation}
+            Các tham số có điểm số thấp nhất sẽ bị loại bỏ, tức là bị gán $m_i = 0$.
+            
+            \paragraph{Bước cắt tỉa một lần lớn (one-shot step).}
+            Cho tỉ lệ cắt tỉa one-shot $p_k \in (0, p)$ với $p_k = \alpha \cdot p$, trong đó $\alpha \in [0.6,\, 0.8]$ là hệ số phân bổ.
+            Mặt nạ sau bước one-shot được xác định bởi:
+            
+            \begin{equation}
+                m_i^{(0)} \;=\;
+                \begin{cases}
+                    0, & \text{nếu } |\theta_i| \leq \tau_{p_k}\\
+                    1, & \text{ngược lại,}
+                \end{cases}
+                \label{eq:oneshot-mask}
+            \end{equation}
+            
+            trong đó $\tau_{p_k}$ là ngưỡng được chọn sao cho tỉ lệ thưa thớt sau bước này bằng đúng $p_k$, tức là $s(\symbfit{m}^{(0)}) = p_k$.
+            Một cách tương đương, $\tau_{p_k}$ chính là phân vị thứ $p_k$ của phân phối $\{|\theta_i|\}_{i=1}^{W}$.
+            
+            \paragraph{Số trọng số còn lại.}
+            Sau bước one-shot, số trọng số chưa bị cắt tỉa là:
+            \begin{equation}
+                W^{(0)} \;=\; \|\symbfit{m}^{(0)}\|_0 \;=\; W\,(1 - p_k).
+                \label{eq:remaining-after-oneshot}
+            \end{equation}
+            
+            \paragraph{Lịch trình cắt tỉa hình học lặp lại (iterative geometric schedule).}
+            Gọi $p_i \ll p_k$ là tỉ lệ cắt tỉa tại mỗi bước lặp, được áp dụng trên số trọng số \emph{còn lại} tại bước đó.
+            Sau $n$ bước lặp hình học, số trọng số còn lại là:
+            
+            \begin{equation}
+                W^{(n)} \;=\; W^{(0)} \cdot (1 - p_i)^{n}
+                        \;=\; W\,(1 - p_k)\,(1 - p_i)^{n}.
+                \label{eq:geom-remaining}
+            \end{equation}
+            
+            Mặt nạ tại bước lặp thứ $n$ được cập nhật theo quy tắc:
+            \begin{equation}
+                m_i^{(n)} \;=\;
+                \begin{cases}
+                    0, & \text{nếu } m_i^{(n-1)} = 1 \text{ và }
+                        |\theta_i| \leq \tau_{p_i}^{(n)}\\
+                    m_i^{(n-1)}, & \text{ngược lại,}
+                \end{cases}
+                \label{eq:iter-mask}
+            \end{equation}
+            
+            trong đó $\tau_{p_i}^{(n)}$ là ngưỡng phân vị thứ $p_i$ tính \emph{chỉ trên tập trọng số còn sống} $\{i : m_i^{(n-1)} = 1\}$.
+            
+            \paragraph{Điều kiện dừng.}
+            Quá trình lặp dừng khi tỉ lệ thưa thớt đạt mục tiêu $p$:
+            \begin{equation}
+                s\!\left(\symbfit{m}^{(n^*)}\right) \;\geq\; p,
+                \label{eq:stopping}
+            \end{equation}
+            trong đó $n^* = \left\lceil \dfrac{\ln\!\left(\dfrac{1-p}{1-p_k}\right)}{\ln(1-p_i)} \right\rceil$
+            là số bước lặp tối thiểu cần thiết theo lịch trình hình học.
+            
+            \paragraph{Tinh chỉnh dựa trên patience (patience-based fine-tuning).}
+            Sau mỗi bước cắt tỉa, mô hình được tinh chỉnh cho đến khi độ chính xác trên tập kiểm định không cải thiện thêm trong $\rho$ epoch liên tiếp.
+            Cụ thể, tại bước $t$ của việc tinh chỉnh, thuật toán dừng sớm nếu:
+            \begin{equation}
+                \text{acc}_{\text{val}}^{(t)} \;\leq\; \max_{t' < t}\,\text{acc}_{\text{val}}^{(t')} + \delta
+                \quad \text{trong } \rho \text{ epoch liên tiếp,}
+                \label{eq:patience}
+            \end{equation}
+            trong đó $\delta \geq 0$ là ngưỡng cải thiện tối thiểu.
+            Tham số patience cho bước one-shot được đặt là $\rho_k \approx 200$ epoch,
+            còn với mỗi bước lặp là $\rho_i = \rho_k / 20$.
+
+\SetKwInOut{Input}{Đầu vào}
+\SetKwInOut{Output}{Đầu ra}
+\SetKwFunction{Prune}{CắtTỉaTheoĐộLớn}
+\SetKwFunction{FineTune}{TinhChỉnh}
+\SetKwComment{Comment}{$\triangleright$\ }{}
+\SetKwProg{Fn}{Hàm}{:}{}
+ 
+% ------------------------------------------------------------------
+% Phần 1 / 3 — Vòng lặp chính
+% ------------------------------------------------------------------
+\begin{algorithm}[htbp]
+\DontPrintSemicolon
+\SetAlgoLined
+ 
+\Input{Mô hình đã huấn luyện $f(\cdot\,;\symbfit{\theta})$; tỉ lệ mục tiêu $p$;
+       hệ số phân bổ $\alpha \in [0.6, 0.8]$; tỉ lệ bước lặp $p_i$;
+       patience one-shot $\rho_k$; patience lặp $\rho_i = \rho_k/20$;
+       ngưỡng cải thiện $\delta$; tốc độ học $\eta = \eta_0/10$}
+\Output{Mô hình đã cắt tỉa $f(\cdot\,;\symbfit{\theta} \odot \symbfit{m}^*)$
+        với $s(\symbfit{m}^*) \approx p$}
+ 
+\BlankLine
+\Comment{Khởi tạo mặt nạ toàn một}
+$\symbfit{m} \leftarrow \mathbf{1}^{W}$\;
+ 
+\BlankLine
+\Comment{--- Giai đoạn 1: Bước cắt tỉa one-shot lớn ---}
+$p_k \leftarrow \alpha \cdot p$\;
+$\symbfit{m} \leftarrow$ \Prune{$\symbfit{\theta},\, \symbfit{m},\, p_k$}
+\Comment*[r]{Loại bỏ $p_k \cdot W$ trọng số nhỏ nhất toàn cục}
+ 
+$\symbfit{\theta} \leftarrow$ \FineTune{$f,\, \symbfit{\theta},\, \symbfit{m},\, \eta,\, \rho_k,\, \delta$}
+\Comment*[r]{Tinh chỉnh kéo dài với patience $\rho_k$}
+ 
+\BlankLine
+\Comment{--- Giai đoạn 2: Cắt tỉa hình học lặp lại ---}
+\While{$s(\symbfit{m}) < p$}{
+    $\symbfit{m} \leftarrow$ \Prune{$\symbfit{\theta},\, \symbfit{m},\, p_i$}
+    \Comment*[r]{Xem công thức~(\ref{eq:iter-mask})}
+ 
+    $\symbfit{\theta} \leftarrow$ \FineTune{$f,\, \symbfit{\theta},\, \symbfit{m},\, \eta,\, \rho_i,\, \delta$}
+    \Comment*[r]{Tinh chỉnh ngắn với patience $\rho_i \ll \rho_k$}
+}
+ 
+\BlankLine
+$\symbfit{m}^* \leftarrow \symbfit{m}$\;
+\Return $f\!\left(\cdot\,;\symbfit{\theta} \odot \symbfit{m}^*\right)$\;
+ 
+\caption{Cắt tỉa lai --- Vòng lặp chính (1/3)}
+\label{algo:hybrid-main}
+\end{algorithm}
+ 
+% ------------------------------------------------------------------
+% Phần 2 / 3 — Hàm con CắtTỉaTheoĐộLớn
+% ------------------------------------------------------------------
+% Dùng addtocounter để giữ cùng số thứ tự thuật toán (tuỳ chọn).
+% Nếu muốn đánh số độc lập, xoá hai dòng addtocounter bên dưới.
+\addtocounter{algocf}{-1}   % giữ nguyên bộ đếm
+\begin{algorithm}[htbp]
+\DontPrintSemicolon
+\SetAlgoLined
+ 
+\Fn{\Prune{$\symbfit{\theta},\; \symbfit{m},\; r$}}{
+    \KwIn{Trọng số $\symbfit{\theta}$; mặt nạ hiện tại $\symbfit{m}$;
+          tỉ lệ cắt tỉa $r \in (0,1)$ trên số trọng số còn sống}
+    \KwOut{Mặt nạ $\symbfit{m}$ đã cập nhật}
+    \BlankLine
+    $\mathcal{A} \leftarrow \{i : m_i = 1\}$
+    \Comment*[r]{Tập chỉ số trọng số còn sống}
+    $k \leftarrow \lfloor r \cdot |\mathcal{A}| \rfloor$
+    \Comment*[r]{Số trọng số cần loại bỏ bước này}
+    Sắp xếp $\mathcal{A}$ theo $|\theta_i|$ tăng dần thành $[a_1, a_2, \ldots]$\;
+    \lFor{$j = 1$ \KwTo $k$}{$m_{a_j} \leftarrow 0$}
+    \Return $\symbfit{m}$\;
+}
+ 
+\caption{Cắt tỉa lai --- Hàm \textsc{CắtTỉaTheoĐộLớn} (2/3)}
+\label{algo:hybrid-prune}
+\end{algorithm}
+ 
+% ------------------------------------------------------------------
+% Phần 3 / 3 — Hàm con TinhChỉnh (patience-based)
+% ------------------------------------------------------------------
+\addtocounter{algocf}{-1}   % giữ nguyên bộ đếm
+\begin{algorithm}[htbp]
+\DontPrintSemicolon
+\SetAlgoLined
+ 
+\Fn{\FineTune{$f,\; \symbfit{\theta},\; \symbfit{m},\; \eta,\; \rho,\; \delta$}}{
+    \KwIn{Mô hình $f$; trọng số $\symbfit{\theta}$; mặt nạ $\symbfit{m}$;
+          tốc độ học $\eta$; patience $\rho$; ngưỡng $\delta$}
+    \KwOut{Trọng số $\symbfit{\theta}^*$ tốt nhất quan sát được}
+    \BlankLine
+    $\text{acc}^* \leftarrow 0$;\quad
+    $\symbfit{\theta}^* \leftarrow \symbfit{\theta}$;\quad
+    $c \leftarrow 0$\;
+    \Repeat{$c \geq \rho$}{
+        $\symbfit{\theta} \leftarrow \symbfit{\theta}
+            - \eta\,\nabla_{\symbfit{\theta}}\mathcal{L}(f,\symbfit{\theta},\symbfit{m})$
+        \Comment*[r]{Một bước SGD có mặt nạ}
+        $\theta_i \leftarrow \theta_i \cdot m_i \;\forall\, i$
+        \Comment*[r]{Tái áp dụng mặt nạ sau cập nhật}
+        Tính $\text{acc}_{\text{val}}$ trên tập kiểm định\;
+        \eIf{$\text{acc}_{\text{val}} > \text{acc}^* + \delta$}{
+            $\text{acc}^* \leftarrow \text{acc}_{\text{val}}$;\quad
+            $\symbfit{\theta}^* \leftarrow \symbfit{\theta}$;\quad
+            $c \leftarrow 0$\;
+        }{
+            $c \leftarrow c + 1$\;
+        }
+    }
+    \Return $\symbfit{\theta}^*$\;
+}
+ 
+\caption{Cắt tỉa lai --- Hàm \textsc{TinhChỉnh} với dừng sớm (3/3)}
+\label{algo:hybrid-finetune}
+\end{algorithm}
+
+            Theo khuyến nghị thực nghiệm~\cite{hybrid}:
+            khi $p < 0.8$, nên đặt $p_i \approx 0.10$;
+            khi $p \geq 0.8$, nên đặt $p_i \approx 0.02$.
+            Hệ số $\alpha$ thường được chọn trong khoảng $[0.6, 0.8]$, tương ứng với việc loại bỏ $60\%$--$80\%$ tổng lượng cắt tỉa mục tiêu ngay trong bước đầu tiên.
+    \section{Hybrid Improved}
+        \subsection{Điểm yếu của thuật toán Hybrid}
+            Mặc dù Hybrid Pruning đã cho thấy hiệu quả vượt trội so với hai chiến lược riêng lẻ trong phần lớn các kịch bản, thuật toán gốc vẫn tồn tại ba điểm yếu cơ bản ảnh hưởng đến hiệu năng và khả năng tổng quát hóa.
+    
+            Đầu tiên, thuật toán gốc khuyến nghị $r_k \in [0.60, 0.80]$ dựa trên kết quả grid search trên một tập kiến trúc và dataset hạn chế \cite[Sec~.5.5]{hybrid}. Không có nguyên tắc lý thuyết nào kết nối $r_k$ với khả năng chịu đựng của mạng đối với việc loại bỏ trọng số đột ngột. Cùng một giá trị $r_k$ được áp dụng cho ResNet và ViT, mặc dù hai kiến trúc này có bề mặt mất mát (loss landscape) rất khác nhau. Hệ quả là với các kiến trúc chưa được benchmark, người dùng phải thực hiện grid search tốn kém, hoặc chấp nhận hiệu năng dưới mức tối ưu.
+    
+            Thứ hai, quá trình tinh chỉnh sau bước one-shot dựa hoàn toàn vào task loss. Sau khi tỉa $r_k \times p$ trọng số trong một bước, mạng chịu một cú sốc cấu trúc lớn. Thuật toán gốc khôi phục hiệu năng thuần túy thông qua $\approx 200$ epoch tinh chỉnh bằng task loss. Điều này có hai vấn đề. Thứ nhất, nó tốn kém về tính toán và không có tín hiệu bên ngoài nào hướng dẫn mạng về những biểu diễn (representation) nào cần khôi phục. Thứ hai, khi $r_k$ lớn (gần 80\%), mạng thường không hội tụ đủ trong $\tau_k$ epoch vì không gian tham số bị thu hẹp đột ngột quá nhiều.
+    
+            Thứ ba, chuyển tiếp đột ngột từ giai đoạn one-shot sang iterative. Khi kết thúc giai đoạn one-shot, learning rate đã suy giảm về gần 0 theo lịch cosine (cosine learning rate schedule). Giai đoạn iterative geometric bắt đầu từ learning rate nhỏ $\eta_{ft}$ mà không có giai đoạn khởi động (warm-up), tức là ngay sau mỗi bước tỉa nhỏ tiếp theo, gradient descent hoạt động trong một vùng rất hẹp quanh điểm hội tụ của giai đoạn trước. Điều này hạn chế khả năng tái tổ chức trọng số, đặc biệt ở tỉ lệ tỉa cao khi các trọng số còn lại cần thích nghi đáng kể với cấu trúc mạng mới.
+
+        \subsection{Đề xuất cải tiến}
+            Để giải quyết vấn dề thứ nhất, thay vì chọn $r_k$ theo kinh nghiệm, ta muốn xác định $r_k$ trực tiếp từ đặc tính của bề mặt mất mát trước khi tỉa. Ta thực hiện điều này dựa trên hàm mất mát: nếu bề mặt mất mát phẳng (độ cong thấp), mạng chịu được tỉa mạnh vì các trọng số còn lại dễ bù đắp cho phần đã bị loại bỏ; ngược lại, bề mặt nhọn đòi hỏi $r_k$ nhỏ hơn.
+
+            \paragraph{Fisher Information Trace.}
+            Fisher Information Matrix (FIM) là $$\mathbf{F} = \mathbb{E}_{(x,y)\sim p_\text{data}}\left[\nabla_\theta \log p(y|x,\theta)\,\nabla_\theta \log p(y|x,\theta)^\top\right]$$
+            Trace của $\mathbf{F}$ đo tổng độ cong của log-likelihood theo mọi hướng tham số. Thay vì tính FIM đầy đủ (chi phí $O(|\theta|^2)$), ta ước lượng trace thực nghiệm bằng chuẩn bình phương gradient:
+
+            \begin{equation}
+                \hat{\mathcal{F}} = \frac{1}{|\theta|} \cdot \frac{1}{B} \sum_{b=1}^{B} \lVert \nabla_\theta \mathcal{L}(x_b, y_b; \theta) \rVert^2
+                \label{eq:fisher_trace}
+            \end{equation}
+
+            trong đó $B$ là số mini-batch dùng để ước lượng (trong thực nghiệm, $B = 10$ là đủ ổn định). Đây là phép tính chi phí thấp: chỉ cần một forward-backward pass, không cần nghịch đảo ma trận Hessian.
+
+            \paragraph{Ánh xạ Fisher trace sang $r_k$.}
+            Ta ánh xạ $\hat{\mathcal{F}}$ sang tỉ lệ one-shot thông qua hàm sigmoid:
+             
+            \begin{equation}
+                r_k = \operatorname{clip}\left(0.8 - 0.3 \cdot \sigma\left(\alpha \cdot \ln\frac{\hat{\mathcal{F}}}{\mathcal{F}_{\text{ref}}}\right), 0.50, 0.80\right)
+                \label{eq:adaptive_rk}
+            \end{equation}
+             
+            trong đó $\sigma(\cdot)$ là hàm sigmoid, $\mathcal{F}_\text{ref}$ là giá trị tham chiếu theo kiến trúc (ví dụ: $10^{-3}$ với ResNet/CIFAR), và $\alpha$ điều khiển độ nhạy. Khi $\hat{\mathcal{F}} \gg \mathcal{F}_\text{ref}$ (bề mặt nhọn), $\sigma(\cdot) \to 1$, và $r_k \to 0.5$; khi $\hat{\mathcal{F}} \ll \mathcal{F}_\text{ref}$ (bề mặt phẳng), $\sigma(\cdot) \to 0$, và $r_k \to 0.8$.
+            
+
+            Để giải quyết vấn đề thứ hai, thay vì để task loss tự tìm lại biểu diễn tốt sau khi mạng bị tỉa mạnh, ta dùng chính mô hình dày đặc trước khi tỉa làm \emph{teacher} để hướng dẫn mạng đã tỉa (student) khôi phục các biểu diễn quan trọng.
+            
+
+            \paragraph{\textbf{Hàm mất mát distillation.}}
+            Trước bước one-shot, ta lưu ảnh chụp (snapshot) $\theta_0$ của mô hình dày đặc. Sau khi tỉa tới tỉ lệ $r_k \cdot p$, ta tinh chỉnh mô hình đã tỉa $\theta_{pk}$ bằng hàm mất mát kết hợp:
+             
+            \begin{equation}
+                \mathcal{L}_\text{total} = (1 - \lambda)\,\mathcal{L}_\text{task}(\theta_{pk}) + \lambda\,\mathcal{L}_\text{KD}(\theta_{pk},\, \theta_0),
+                \label{eq:kd_loss}
+            \end{equation}
+
+            trong đó hàm distillation dựa trên KL-divergence giữa phân phối softmax nhiệt độ $T$ của hai mô hình:
+             
+            \begin{equation}
+                \mathcal{L}_{\text{KD}}(\theta_{pk}, \theta_0)
+                = T^2 \cdot D_{\text{KL}}\Big(
+                \sigma\Big(\frac{f_{\theta_0}(x)}{T}\Big)
+                \,\Big\Vert\,
+                \sigma\Big(\frac{f_{\theta_{pk}}(x)}{T}\Big)
+                \Big)
+                \label{eq:kd_kl}
+            \end{equation}
+            Hệ số $T^2$ chuẩn hóa gradient về cùng biên độ với $\mathcal{L}_\text{task}$.
+
+            Sau khi giai đoạn one-shot kết thúc, mạng đã khôi phục hiệu năng gần với mạng teacher. Tiếp tục dùng KD trong giai đoạn geometric sẽ kìm hãm các điều chỉnh trọng số nhỏ mà geometric pruning cần thực hiện --- teacher đã không còn là mục tiêu phù hợp vì cấu trúc mạng đã khác. Do đó, $\mathcal{L}_\text{KD}$ chỉ được dùng khi $n = 0$ (bước one-shot), và bị tắt hoàn toàn với $n \geq 1$.
+
+
+            Với vấn đề thứ ba, ở cuối giai đoạn one-shot, cosine annealing đã đưa learning rate về gần bằng 0. Khi giai đoạn iterative bắt đầu và thực hiện bước tỉa đầu tiên, gradient descent chỉ hoạt động trong vùng cực kỳ hẹp quanh điểm hội tụ cũ. Điều này hạn chế khả năng các trọng số còn lại tái tổ chức để bù đắp cho phần vừa bị tỉa.
+
+            Để khắc phục điều này, tại mỗi bước iterative ($n \geq 1$), ta thay thế lịch cosine trần bằng một lịch kết hợp: warm-up tuyến tính trong $E_w$ epoch đầu, tiếp theo bởi cosine annealing trong phần còn lại:
+
+            \begin{equation}
+                \eta(e) =
+                \begin{cases}
+                \eta_{\text{ft}} \cdot \dfrac{e+1}{E_w} & \text{nếu } e < E_w, \\[6pt]
+                \eta_{\text{ft}} \cdot \dfrac{1}{2} \left(1 + \cos\left(\dfrac{\pi(e - E_w)}{E_{\text{max}} - E_w}\right)\right) & \text{nếu } e \geq E_w
+                \end{cases}
+                \label{eq:lr_warmup}
+            \end{equation}
+
+            Warm-up $E_w = 5$ epoch là đủ để cho trọng số còn lại không gian thích nghi với cấu trúc mạng mới trước khi learning rate giảm dần. Cơ chế này không phải là full rewinding (như trong) mà là một phiên bản nhẹ: chỉ áp dụng ở đầu mỗi bước iterative, không làm lại từ đầu lịch của giai đoạn ban đầu.
+            Mã giả của thuật toán như sau:
+
+\begin{algorithm}[H]
+    \caption{Hybrid Pruning Cải tiến -- Giai đoạn 1: Huấn luyện ban đầu}
+    \label{alg:hybrid_improved_phase1}
+    \DontPrintSemicolon
+    \SetAlgoLined
+    
+    \KwIn{Mạng $\mathcal{M}$, dữ liệu $\mathcal{D}$, learning rate $\eta_0$}
+    \KwOut{Snapshot teacher $\theta_0$}
+    
+    Huấn luyện $\mathcal{M}$ đến hội tụ với learning rate $\eta_0$\;
+    $\theta_0 \leftarrow \mathcal{M}$\tcp{lưu snapshot teacher}
+\end{algorithm}
+
+\begin{algorithm}[H]
+    \caption{Hybrid Pruning Cải tiến -- Giai đoạn 2: Xây dựng lịch trình tỉa}
+    \label{alg:hybrid_improved_phase2}
+    \DontPrintSemicolon
+    \SetAlgoLined
+    
+    \KwIn{Tỉ lệ tỉa mục tiêu $p$, độ nhạy Fisher $\alpha$, tham chiếu $\mathcal{F}_{\text{ref}}$, tỉ lệ iterative $p_i$}
+    \KwOut{Lịch trình tỉa $\mathcal{S}$}
+    
+    $\hat{\mathcal{F}} \leftarrow \frac{1}{|\theta|}\cdot \frac{1}{B}\sum_{b=1}^{B}\left\lVert \nabla_\theta \mathcal{L}(x_b, y_b;\theta)\right\rVert^2$\;
+    $r_k \leftarrow \operatorname{clip}\!\left(0.8 - 0.3 \cdot \sigma\!\left(\alpha \ln\!\left(\hat{\mathcal{F}} / \mathcal{F}_{\text{ref}}\right)\right), 0.50, 0.80\right)$\;
+    
+    $\mathcal{S} \leftarrow [\,]$\;
+    $\tilde{p} \leftarrow 0$\;
+    $n \leftarrow 0$\;
+    
+    \While{$p - \tilde{p} > \varepsilon$}{
+        \eIf{$n = 0$}{
+            $\Delta \leftarrow r_k \cdot p$\;
+        }{
+            $\Delta \leftarrow \min(p_i(1-\tilde{p}),\ p-\tilde{p})$\;
+        }
+        $\mathcal{S} \leftarrow \mathcal{S} \cup \left\{ \Delta / (1-\tilde{p}) \right\}$\;
+        $\tilde{p} \leftarrow \tilde{p} + \Delta$\;
+        $n \leftarrow n + 1$\;
+    }
+
+\end{algorithm}
+
+\begin{algorithm}[H]
+    \caption{Hybrid Pruning Cải tiến -- Giai đoạn 3: Tỉa và tinh chỉnh}
+    \label{alg:hybrid_improved_phase3}
+    \DontPrintSemicolon
+    \SetAlgoLined
+    
+    \KwIn{Mạng $\mathcal{M}$, snapshot teacher $\theta_0$, lịch trình tỉa $\mathcal{S}$, patience $\tau_k, \tau_i$, temperature $T$, KD weight $\lambda$, warm-up epoch $E_w$}
+    \KwOut{Mạng đã tỉa $\mathcal{M}^*$}
+    
+    $\eta_{\text{ft}} \leftarrow \eta_0 / 10$\;
+    
+    \For{$n \leftarrow 1$ \KwTo $|\mathcal{S}|$}{
+        $s_n \leftarrow \mathcal{S}[n]$\;
+        Tỉa $s_n$ trọng số có magnitude nhỏ nhất trong số trọng số còn lại\;
+    
+        \eIf{$n = 1$}{
+            $\tau \leftarrow \tau_k$\;
+            $\mathcal{L}_{\text{eff}} \leftarrow (1-\lambda)\mathcal{L}_{\text{task}} + \lambda T^2 D_{\text{KL}}\!\left(\sigma(f_{\theta_0}(x)/T)\parallel \sigma(f_{\mathcal{M}}(x)/T)\right)$\;
+        }{
+            $\tau \leftarrow \tau_i$\;
+            $\mathcal{L}_{\text{eff}} \leftarrow \mathcal{L}_{\text{task}}$\;
+        }
+    
+        \While{validation accuracy has not improved for $\tau$ epochs}{
+            \If{$n \geq 2$}{
+                $\eta \leftarrow \eta_{\text{ft}} \cdot \frac{\mathrm{epoch}+1}{E_w}$\;
+            }{
+                $\eta \leftarrow \text{cosine schedule}(\eta_{\text{ft}})$\;
+            }
+            Huấn luyện 1 epoch với $\mathcal{L}_{\text{eff}}$ và $\eta$; giữ lại mặt nạ tỉa\;
+        }
+        Khôi phục checkpoint có độ chính xác tốt nhất\;
+    }
+    
+    \KwRet{$\mathcal{M}^*$}\;
+    
+\end{algorithm}

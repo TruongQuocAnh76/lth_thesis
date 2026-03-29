@@ -1,0 +1,57 @@
+\contentsline {chapter}{\numberline {1}Tổng quan}{1}{chapter.1}%
+\contentsline {section}{\numberline {1.1}Động lực}{1}{section.1.1}%
+\contentsline {section}{\numberline {1.2}Vấn đề nghiên cứu}{1}{section.1.2}%
+\contentsline {section}{\numberline {1.3}Mục tiêu nghiên cứu}{1}{section.1.3}%
+\contentsline {section}{\numberline {1.4}Đóng góp}{1}{section.1.4}%
+\contentsline {chapter}{\numberline {2}Nền tảng \& Tổng quan}{2}{chapter.2}%
+\contentsline {section}{\numberline {2.1}Giả thuyết vé số may mắn}{2}{section.2.1}%
+\contentsline {section}{\numberline {2.2}Phân loại thuật toán}{2}{section.2.2}%
+\contentsline {subsection}{\numberline {2.2.1}Nhóm cắt tỉa sau kết nối}{2}{subsection.2.2.1}%
+\contentsline {subsection}{\numberline {2.2.2}Nhóm cắt tỉa giai đoạn sớm}{3}{subsection.2.2.2}%
+\contentsline {subsection}{\numberline {2.2.3}Nhóm cắt tỉa tại thời điểm khởi tạo}{3}{subsection.2.2.3}%
+\contentsline {subsection}{\numberline {2.2.4}Nhóm cắt tỉa hỗn hợp}{3}{subsection.2.2.4}%
+\contentsline {chapter}{\numberline {3}Phương pháp}{5}{chapter.3}%
+\contentsline {section}{\numberline {3.1}Thuật toán baseline}{5}{section.3.1}%
+\contentsline {subsection}{\numberline {3.1.1}\gls {imp}}{5}{subsection.3.1.1}%
+\contentsline {subsection}{\numberline {3.1.2}\gls {eb}}{7}{subsection.3.1.2}%
+\contentsline {paragraph}{\nonumberline \textbf {Khoảng cách mask}.}{8}{paragraph*.5}%
+\contentsline {paragraph}{\nonumberline \textbf {Điều kiện xuất hiện EB Ticket.}}{8}{paragraph*.7}%
+\contentsline {paragraph}{\nonumberline \textbf {Giả thuyết EB Ticket.}}{8}{paragraph*.9}%
+\contentsline {subsection}{\numberline {3.1.3}\gls {grasp}}{10}{subsection.3.1.3}%
+\contentsline {paragraph}{\nonumberline Tiêu chí tỉa dựa trên bảo toàn gradient.}{10}{paragraph*.11}%
+\contentsline {paragraph}{\nonumberline Điểm quan trọng của từng trọng số.}{11}{paragraph*.13}%
+\contentsline {paragraph}{\nonumberline \textbf {Xây dựng mặt nạ tỉa.}}{11}{paragraph*.15}%
+\contentsline {paragraph}{\nonumberline \textbf {Tính tích Hessian--gradient}}{11}{paragraph*.17}%
+\contentsline {subsection}{\numberline {3.1.4}Synflow}{13}{subsection.3.1.4}%
+\contentsline {subsubsection}{\nonumberline Định lý bảo toàn và hệ quả}{14}{subsubsection*.19}%
+\contentsline {subsubsection}{\nonumberline Điểm Synaptic Flow và hàm mục tiêu SynFlow}{15}{subsubsection*.21}%
+\contentsline {subsubsection}{\nonumberline Điều kiện đủ để đạt Nén Tới Hạn Cực Đại}{16}{subsubsection*.23}%
+\contentsline {subsection}{\numberline {3.1.5}Hybrid}{17}{subsection.3.1.5}%
+\contentsline {paragraph}{\nonumberline Tiêu chí quan trọng theo độ lớn (magnitude criterion).}{18}{paragraph*.25}%
+\contentsline {paragraph}{\nonumberline Bước cắt tỉa một lần lớn (one-shot step).}{18}{paragraph*.27}%
+\contentsline {paragraph}{\nonumberline Số trọng số còn lại.}{18}{paragraph*.29}%
+\contentsline {paragraph}{\nonumberline Lịch trình cắt tỉa hình học lặp lại (iterative geometric schedule).}{18}{paragraph*.31}%
+\contentsline {paragraph}{\nonumberline Điều kiện dừng.}{19}{paragraph*.33}%
+\contentsline {paragraph}{\nonumberline Tinh chỉnh dựa trên patience (patience-based fine-tuning).}{19}{paragraph*.35}%
+\contentsline {section}{\numberline {3.2}Hybrid Improved}{19}{section.3.2}%
+\contentsline {subsection}{\numberline {3.2.1}Điểm yếu của thuật toán Hybrid}{19}{subsection.3.2.1}%
+\contentsline {subsection}{\numberline {3.2.2}Đề xuất cải tiến}{22}{subsection.3.2.2}%
+\contentsline {paragraph}{\nonumberline Fisher Information Trace.}{22}{paragraph*.40}%
+\contentsline {paragraph}{\nonumberline Ánh xạ Fisher trace sang $r_k$.}{22}{paragraph*.42}%
+\contentsline {paragraph}{\nonumberline \textbf {Hàm mất mát distillation.}}{23}{paragraph*.44}%
+\contentsline {chapter}{\numberline {4}Thiết lập thử nghiệm}{26}{chapter.4}%
+\contentsline {section}{\numberline {4.1}Bộ dữ liệu}{26}{section.4.1}%
+\contentsline {subsection}{\numberline {4.1.1}MNIST}{26}{subsection.4.1.1}%
+\contentsline {subsection}{\numberline {4.1.2}CIFAR-10}{26}{subsection.4.1.2}%
+\contentsline {subsection}{\numberline {4.1.3}CIFAR-100}{27}{subsection.4.1.3}%
+\contentsline {section}{\numberline {4.2}Kiến trúc mạng}{27}{section.4.2}%
+\contentsline {subsection}{\numberline {4.2.1}ResNet-20}{28}{subsection.4.2.1}%
+\contentsline {subsection}{\numberline {4.2.2}ResNet-50}{28}{subsection.4.2.2}%
+\contentsline {section}{\numberline {4.3}Siêu tham số}{28}{section.4.3}%
+\contentsline {section}{\numberline {4.4}Chỉ số đánh giá}{28}{section.4.4}%
+\contentsline {subsection}{\numberline {4.4.1}Độ Chính Xác Phân Loại}{30}{subsection.4.4.1}%
+\contentsline {subsection}{\numberline {4.4.2}Chỉ Số Nén Mô Hình}{30}{subsection.4.4.2}%
+\contentsline {chapter}{\numberline {5}Kết quả}{31}{chapter.5}%
+\contentsline {chapter}{\numberline {6}Thảo luận}{32}{chapter.6}%
+\contentsline {chapter}{\numberline {7}Kết luận}{33}{chapter.7}%
+\providecommand \tocbasic@end@toc@file {}\tocbasic@end@toc@file 

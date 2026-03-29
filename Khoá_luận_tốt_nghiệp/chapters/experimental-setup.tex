@@ -1,0 +1,242 @@
+\chapter{Thiết lập thử nghiệm}
+    \section{Bộ dữ liệu}
+        Các thử nghiệm được thực hiện trên ba bộ dữ liệu phân loại ảnh tiêu chuẩn.
+        Các bộ dữ liệu này được chọn vì chúng được sử dụng rộng rãi trong văn
+        献 nghiên cứu về pruning mạng nơ-ron, cho phép so sánh trực tiếp với
+        các công trình trước đây \cite{imp, grasp, synflow, hybrid}.
+         
+        \subsection{MNIST}
+        \label{subsec:mnist}
+         
+        MNIST~\cite{lecun1998mnist} là bộ dữ liệu nhận dạng chữ số viết tay gồm 70\,000
+        ảnh thang độ xám kích thước $28 \times 28$ pixel, trong đó 60\,000 ảnh dùng để
+        huấn luyện và 10\,000 ảnh dùng để kiểm tra.
+        Bộ dữ liệu bao gồm 10 lớp tương ứng với các chữ số từ 0 đến 9.
+         
+        Trong luận văn này, MNIST được sử dụng như một thiết lập kiểm chứng nhanh
+        (\textit{quick validation}) để xác nhận tính đúng đắn của các thuật toán pruning
+        trước khi chạy trên các bộ dữ liệu phức tạp hơn.
+        Bộ dữ liệu không yêu cầu tiền xử lý đặc biệt; ảnh chỉ được chuẩn hóa về
+        khoảng $[0, 1]$ bằng cách chia cho 255.
+         
+        % ----------------------------------------------------------
+        \subsection{CIFAR-10}
+        \label{subsec:cifar10}
+         
+        CIFAR-10~\cite{krizhevsky2009learning} là bộ dữ liệu phân loại ảnh màu
+        kích thước $32 \times 32$ pixel gồm 60\,000 ảnh thuộc 10 lớp đối tượng
+        (máy bay, ô tô, chim, mèo, hươu, chó, ếch, ngựa, tàu thủy, xe tải),
+        với 50\,000 ảnh huấn luyện và 10\,000 ảnh kiểm tra (mỗi lớp 5\,000/1\,000 ảnh).
+         
+        CIFAR-10 là bộ dữ liệu tham chiếu chính trong luận văn vì đây là benchmark
+        tiêu chuẩn được hầu hết các công trình \gls{imp} sử dụng.
+        
+        Quá trình tiền xử lý bao gồm:
+        \begin{itemize}
+            \item \textbf{Huấn luyện:} Lật ngang ngẫu nhiên (random horizontal flip),
+                  cắt ngẫu nhiên sau padding 4 pixel (random crop with padding=4),
+                  chuẩn hóa với giá trị trung bình $\mu = (0.4914,\,0.4822,\,0.4465)$
+                  và độ lệch chuẩn $\sigma = (0.2023,\,0.1994,\,0.2010)$.
+            \item \textbf{Kiểm tra:} Chỉ chuẩn hóa (không tăng cường dữ liệu).
+        \end{itemize}
+         
+        % ----------------------------------------------------------
+        \subsection{CIFAR-100}
+        \label{subsec:cifar100}
+         
+        CIFAR-100~\cite{krizhevsky2009learning} có cùng định dạng và kích thước với
+        CIFAR-10 (60\,000 ảnh $32 \times 32$) nhưng được phân chia thành 100 lớp chi
+        tiết hơn, mỗi lớp có 500 ảnh huấn luyện và 100 ảnh kiểm tra.
+        Đây là bộ dữ liệu thách thức hơn vì không gian nhãn rộng hơn đáng kể.
+         
+        CIFAR-100 được sử dụng để đánh giá khả năng mở rộng (scalability) của
+        các phương pháp pruning khi độ phức tạp của tác vụ phân loại tăng lên.
+        Quy trình tiền xử lý tương tự CIFAR-10, với giá trị chuẩn hóa riêng:
+        $\mu = (0.5071,\,0.4867,\,0.4408)$ và
+        $\sigma = (0.2675,\,0.2565,\,0.2761)$.
+         
+        \begin{table}[htbp]
+        \centering
+        \caption{Tổng quan các bộ dữ liệu sử dụng trong thực nghiệm.}
+        \label{tab:datasets}
+        \begin{tabular}{lcccccc}
+        \hline
+        \textbf{Bộ dữ liệu} & \textbf{Lớp} & \textbf{Kích thước ảnh} & \textbf{Train} & \textbf{Test} & \textbf{Màu sắc} & \textbf{Vai trò} \\
+        \hline
+        MNIST     & 10  & $28\times28$ & 60\,000 & 10\,000 & Xám & Kiểm chứng nhanh \\
+        CIFAR-10  & 10  & $32\times32$ & 50\,000 & 10\,000 & RGB & Benchmark chính  \\
+        CIFAR-100 & 100 & $32\times32$ & 50\,000 & 10\,000 & RGB & Đánh giá mở rộng \\
+        \hline
+        \end{tabular}
+        \end{table}
+
+    \section{Kiến trúc mạng}
+    Bốn kiến trúc mạng nơ-ron được sử dụng trong luận văn nhằm đánh giá
+hiệu quả của các thuật toán pruning trên nhiều quy mô mô hình khác nhau,
+từ mạng nhỏ gọn đến mạng sâu có dung lượng lớn.
+ 
+    % ----------------------------------------------------------
+    \subsection{ResNet-20}
+    \label{subsec:resnet20}
+     
+    ResNet-20~\cite{he2016deep} là phiên bản nhỏ nhất của họ ResNet được thiết kế
+    đặc biệt cho bộ dữ liệu CIFAR.
+    Mạng gồm 20 lớp tích chập với tổng cộng khoảng \textbf{270\,000 tham số},
+    được tổ chức thành ba nhóm (stages) với lần lượt 16, 32 và 64 bộ lọc,
+    mỗi nhóm gồm $n=3$ khối residual.
+     
+    Cơ chế kết nối tắt (skip connection) trong mỗi khối residual cho phép
+    gradient lan truyền hiệu quả, giúp mạng hội tụ ổn định ngay cả sau khi
+    cắt tỉa lớn.
+    ResNet-20 đóng vai trò kiến trúc tham chiếu chính (primary baseline) và
+    được sử dụng trong tất cả các thử nghiệm so sánh do chi phí tính toán thấp,
+    phù hợp với việc chạy nhiều cấu hình thử nghiệm.
+     
+    % ----------------------------------------------------------
+    \subsection{ResNet-50}
+    \label{subsec:resnet50}
+     
+    ResNet-50~\cite{he2016deep} là phiên bản sâu hơn với 50 lớp, sử dụng
+    kiến trúc khối \textit{bottleneck} (conv $1\times1$ -- conv $3\times3$ -- conv $1\times1$)
+    với khoảng \textbf{25,6 triệu tham số}.
+    Mạng gồm bốn stages với lần lượt 64, 128, 256 và 512 kênh đặc trưng
+    (feature channels).
+     
+    ResNet-50 được sử dụng trên CIFAR-100 để đánh giá liệu các \textit{winning
+    ticket} có tồn tại và duy trì hiệu năng cao trong mô hình có dung lượng lớn
+    hay không.
+    Khối lượng tham số cao hơn cũng giúp kiểm tra khả năng mở rộng của
+    thuật toán Genetic Algorithm và Hybrid-Improve khi không gian tìm kiếm tăng lên.
+
+    \section{Siêu tham số}
+    \label{subsec:algo_hparams}
+        
+        \begin{table}[htbp]
+        \centering
+        \caption{Siêu tham số đặc thù cho từng thuật toán pruning (CIFAR-10/ResNet-20).}
+        \label{tab:algo_hparams}
+        \resizebox{\textwidth}{!}{%
+        \begin{tabular}{llll}
+        \hline
+        \textbf{Thuật toán} & \textbf{Siêu tham số} & \textbf{Giá trị} & \textbf{Ý nghĩa} \\
+        \hline
+        \multirow{7}{*}{IMP}
+        & \texttt{target\_sparsity}     & 0.3, 0.6          & Tỷ lệ tham số bị cắt tỉa \\
+        & \texttt{num\_iterations}      & 5                 & Số vòng lặp pruning \\
+        & \texttt{epochs\_per\_iteration} & 100              & Số epoch mỗi vòng lặp \\
+        & \texttt{use\_global\_pruning} & True              & Pruning toàn cục hay theo lớp \\
+        & \texttt{learning\_rate}       & 0.1               & Tốc độ học \\
+        & \texttt{batch\_size}          & 128               & Kích thước batch \\
+        & \texttt{weight\_decay}        & 0.0005            & Hệ số regularization \\
+        \hline
+        \multirow{5}{*}{Early-Bird}
+        & \texttt{target\_sparsity}     & 0.3, 0.6          & Tỷ lệ kênh bị cắt tỉa \\
+        & \texttt{search\_epochs}       & 17--19            & Số epoch tìm kiếm vé (thực tế) \\
+        & \texttt{finetune\_epochs}     & 20--100+          & Số epoch tinh chỉnh (thực tế) \\
+        & \texttt{l1\_coef}             & $10^{-4}$         & Hệ số phạt L1 trên $\gamma$ BN \\
+        & \texttt{distance\_threshold}  & 0.1               & Ngưỡng hội tụ mặt nạ \\
+        \hline
+        \multirow{8}{*}{GraSP}
+        & \texttt{target\_sparsity}     & 0.3, 0.6          & Tỷ lệ tham số bị cắt tỉa \\
+        & \texttt{epochs}               & 160               & Số epoch huấn luyện sau pruning \\
+        & \texttt{samples\_per\_class}  & 10                & Số mẫu/lớp để tính GraSP score \\
+        & \texttt{grasp\_T}             & 200.0             & Nhiệt độ scaling logits \\
+        & \texttt{grasp\_iters}         & 1                 & Số lần tích lũy gradient \\
+        & \texttt{learning\_rate}       & 0.1               & Tốc độ học \\
+        & \texttt{batch\_size}          & 128               & Kích thước batch \\
+        & \texttt{weight\_decay}        & 0.0001            & Hệ số regularization \\
+        \hline
+        \multirow{8}{*}{SynFlow}
+        & \texttt{rho}                  & 1.43, 2.5         & Tỷ lệ nén $\rho$ (tương ứng sparsity 0.3, 0.6) \\
+        & \texttt{target\_sparsity}     & 0.3, 0.6          & Tỷ lệ tham số bị cắt tỉa (thực tế) \\
+        & \texttt{synflow\_iters}       & 100               & Số vòng lặp SynFlow \\
+        & \texttt{epochs}               & 160               & Số epoch huấn luyện sau pruning \\
+        & \texttt{learning\_rate}       & 0.1               & Tốc độ học \\
+        & \texttt{batch\_size}          & 128               & Kích thước batch \\
+        & \texttt{weight\_decay}        & 0.0001            & Hệ số regularization \\
+        \hline
+        \multirow{11}{*}{Hybrid}
+        & \texttt{target\_sparsity}     & 0.3, 0.6          & Tỷ lệ cắt tỉa mục tiêu \\
+        & \texttt{oneshot\_ratio}       & 0.7               & Phần one-shot của mục tiêu \\
+        & \texttt{iterative\_step}      & 0.1               & Phần trọng số cắt mỗi bước lặp \\
+        & \texttt{initial\_epochs}      & 160               & Epoch huấn luyện dày đặc \\
+        & \texttt{initial\_lr}          & 0.01              & LR ban đầu pha huấn luyện dày đặc \\
+        & \texttt{oneshot\_finetune\_max\_epochs} & 200 & Epoch tinh chỉnh sau one-shot \\
+        & \texttt{oneshot\_finetune\_patience} & 200 & Patience tinh chỉnh one-shot \\
+        & \texttt{iter\_finetune\_max\_epochs}  & 10  & Epoch tinh chỉnh mỗi bước lặp \\
+        & \texttt{iter\_finetune\_patience} & 10     & Early stopping bước lặp \\
+        & \texttt{batch\_size}          & 128               & Kích thước batch \\
+        & \texttt{weight\_decay}        & 0.0005            & Hệ số regularization \\
+        \hline
+        \multirow{15}{*}{Hybrid-Improve}
+        & \texttt{target\_sparsity}     & 0.3, 0.6          & Tỷ lệ cắt tỉa mục tiêu \\
+        & \texttt{oneshot\_ratio}       & 0.79              & Phần one-shot thích ứng \\
+        & \texttt{iterative\_step}      & 0.2               & Phần trọng số cắt mỗi bước lặp \\
+        & \texttt{initial\_epochs}      & 160               & Epoch huấn luyện dày đặc \\
+        & \texttt{initial\_lr}          & 0.1               & LR ban đầu pha huấn luyện dày đặc \\
+        & \texttt{oneshot\_finetune\_max\_epochs} & 200 & Epoch tinh chỉnh sau one-shot \\
+        & \texttt{oneshot\_finetune\_patience} & 200 & Patience tinh chỉnh one-shot \\
+        & \texttt{iter\_finetune\_max\_epochs}  & 10  & Epoch tinh chỉnh mỗi bước lặp \\
+        & \texttt{iter\_finetune\_patience} & 10     & Early stopping bước lặp \\
+        & \texttt{batch\_size}          & 512               & Kích thước batch \\
+        & \texttt{weight\_decay}        & 0.0005            & Hệ số regularization \\
+        & \texttt{use\_fisher\_adaptive\_ratio} & True & Sử dụng Fisher adaptive ratio \\
+        & \texttt{use\_kd}              & True              & Sử dụng knowledge distillation \\
+        & \texttt{kd\_temperature}       & 4.0               & Nhiệt độ KD \\
+        & \texttt{kd\_lambda}           & 0.5               & Hệ số KD \\
+        \hline
+        \end{tabular}%
+        }
+        \end{table}
+
+    \section{Chỉ số đánh giá}
+    \label{sec:metrics}
+ 
+    Để so sánh toàn diện giữa các thuật toán pruning, luận văn sử dụng
+    ba nhóm chỉ số đánh giá: hiệu năng dự đoán, mức độ nén mô hình,
+    và hiệu quả tính toán.
+ 
+% ----------------------------------------------------------
+    \subsection{Độ Chính Xác Phân Loại}
+    \label{subsec:accuracy}
+    
+    \textbf{Top-1 Test Accuracy} là chỉ số hiệu năng chính, đo tỷ lệ phần trăm
+    mẫu kiểm tra được phân loại đúng:
+    \begin{equation}
+        \text{Acc} = \frac{\text{Số mẫu dự đoán đúng}}{\text{Tổng số mẫu kiểm tra}} \times 100\%
+    \end{equation}
+    
+    Để đảm bảo kết quả đáng tin cậy, mỗi cấu hình thử nghiệm được chạy với
+    nhiều random seed và kết quả được báo cáo dưới dạng giá trị trung bình
+    $\pm$ độ lệch chuẩn.
+    
+    \textbf{Accuracy Drop} ($\Delta$Acc) đo mức độ suy giảm độ chính xác so
+    với mô hình gốc (dense network) tại cùng kiến trúc và bộ dữ liệu:
+    \begin{equation}
+        \Delta\text{Acc} = \text{Acc}_{\text{dense}} - \text{Acc}_{\text{pruned}}
+    \end{equation}
+    Giá trị $\Delta$Acc nhỏ cho thấy phương pháp pruning bảo toàn tốt
+    hiệu năng gốc.
+    
+    % ----------------------------------------------------------
+    \subsection{Chỉ Số Nén Mô Hình}
+    \label{subsec:compression_metrics}
+    
+    \textbf{Sparsity} ($s$) là tỷ lệ trọng số bị cắt tỉa (đặt về 0) trên
+    tổng số trọng số của mô hình:
+    \begin{equation}
+        s = \frac{|\{w_i : w_i = 0\}|}{|\{w_i\}|} \times 100\%
+    \end{equation}
+    Sparsity 90\% nghĩa là chỉ còn 10\% trọng số không bằng 0.
+    
+    \textbf{Compression Ratio} ($\rho$) biểu diễn mức độ nén theo tỷ lệ:
+    \begin{equation}
+        \rho = \frac{1}{1 - s}
+    \end{equation}
+    Ví dụ, sparsity 90\% tương đương $\rho = 10\times$ (mô hình được nén 10 lần).
+    
+    \textbf{Parameters Remaining} ($P_r$) là số lượng tuyệt đối hoặc tỷ lệ
+    trọng số còn lại sau pruning:
+    \begin{equation}
+        P_r = (1 - s) \times P_{\text{total}}
+    \end{equation}

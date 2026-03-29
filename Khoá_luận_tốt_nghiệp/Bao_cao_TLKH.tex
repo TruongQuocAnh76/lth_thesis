@@ -1,0 +1,183 @@
+% !TeX program = xelatex
+% !TeX encoding = UTF-8
+\documentclass[
+    fontsize=13pt,
+    paper=a4,
+    oneside,
+    DIV=calc,
+    chapterprefix=true
+]{scrbook}
+ 
+%\documentclass[13pt,a4paper,oneside]{book} % twoside for draf
+
+\usepackage{setspace}
+
+\setlength{\parindent}{1.27cm}
+\setlength{\parskip}{0pt}
+
+\usepackage{microtype}
+\setlength{\emergencystretch}{3em}
+
+
+\usepackage{fontspec}
+\setmainfont{Latin Modern Roman}
+\usepackage{tabularx}
+
+\usepackage{chngcntr}
+\counterwithout{figure}{chapter}
+\counterwithout{table}{chapter}
+
+\usepackage{caption}
+\captionsetup[table]{position=top}
+
+%\usepackage{babel}
+% \usepackage[utf8]{vietnam}
+%\usepackage{times}
+%\usepackage{graphicx}
+
+\usepackage{husthesis}
+\setstretch{1.3}
+\usepackage{unicode-math}
+\setmathfont{TeX Gyre Termes Math}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+
+
+% Use fancyhdr to force a centered page number in the footer on all pages
+\setlength{\footskip}{54.6pt}
+\setlength{\headheight}{21pt}
+\pagestyle{fancy}
+\fancyhf{}% clear header and footer
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0.4pt}
+% Make chapter pages use the same style
+\makeatletter
+\let\ps@plain\ps@fancy
+\makeatother
+\usepackage[acronym]{glossaries}
+\makeglossaries
+
+\newacronym{imp}{IMP}{Iterative Magnitude Pruning}
+\newacronym{lth}{LTH}{Lottery Ticket Hypothesis}
+\newacronym{eb}{EB}{Early-Bird}
+\newacronym{grasp}{GraSP}{Gradient Signal Preservation}
+\newacronym{sf}{SynFlow}{Iterative Synaptic Flow Pruning}
+\newacronym{snip}{SNIP}{Single Shot Network Pruning}
+
+% \usepackage[utf8]{inputenc}
+% \usepackage[T5]{fontenc}
+% \usepackage[vietnamese]{babel}
+% \usepackage{amssymb} % removed due to conflict with unicode-math
+% \usepackage{tipa} % commented out: causes symbol command conflicts with amssymb
+% \usepackage{amssymb} % removed due to conflict with unicode-math
+\usepackage{bm} % for bold math symbols
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{booktabs}
+% \usepackage{mathptmx}	% same Time New Roma
+\usepackage{amsmath}
+% \usepackage{amsfonts} % removed due to conflict with unicode-math
+%\usepackage{sty/ipa}
+%\renewcommand{\rmdefault}{phv} % Arial
+%\renewcommand{\sfdefault}{phv} % Arial
+%\renewcommand\thesection{\arabic{section}}
+
+\usepackage{array}
+\newcolumntype{P}[1]{>{\centering\arraybackslash}p{#1}}
+\newcolumntype{M}[1]{>{\centering\arraybackslash}m{#1}}
+\usepackage{multirow}
+\usepackage{algorithm2e}
+\usepackage{float}
+\usepackage{listings}
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=cyan,
+}
+
+
+\crname{Khoá luận tốt nghiệp}
+\ctname{Cải Tiến Pruning Hybrid Thích Ứng Để Tìm Vé Số May Mắn Trong Mạng Nơ-ron Sâu}
+\cstuname{
+Trương Quốc Anh - 22001543 \\
+}
+
+\csMajor{Khoa học máy tính và thông tin}
+\csProgram{chuẩn}
+\csSupervise{TS. Nguyễn Hải Vinh}
+\cttime{2026}
+
+\thesislayout
+
+
+\begin{document}
+% Ensure centering on the cover page
+\begingroup
+\centering
+\coverpage
+\endgroup
+
+% \secondcoverpage
+
+\frontmatter
+% Reapply the document pagestyle after cover pages (cover sets empty)
+\pagestyle{fancy}
+
+
+\begin{declaration}
+Em, sinh viên thực hiện đề tài tiểu luận với tiêu đề \textit{“Cải Tiến Pruning Hybrid Thích Ứng Để Tìm Vé Số May Mắn Trong Mạng Nơ-ron Sâu”}, xin cam đoan rằng toàn bộ nội dung trình bày trong báo cáo là kết quả của quá trình nghiên cứu, học tập và tổng hợp kiến thức của nhóm dưới sự hướng dẫn của giảng viên phụ trách. Trong quá trình thực hiện, em có tham khảo một số tài liệu, công trình khoa học và nguồn thông tin từ Internet nhằm phục vụ cho việc tìm hiểu và xây dựng nội dung. Tất cả các tài liệu được sử dụng đều đã được trích dẫn đầy đủ và đúng theo quy định.
+\noindent
+Em cam kết rằng báo cáo được thực hiện một cách nghiêm túc, không sao chép nội dung từ bất kỳ công trình nào nếu không có trích dẫn phù hợp. Các số liệu, hình ảnh, kết quả và phân tích được trình bày đều phản ánh trung thực quá trình tìm hiểu và thực nghiệm. Báo cáo không vi phạm các quy định về đạo đức nghiên cứu, bản quyền cũng như pháp luật hiện hành. Em hoàn toàn chịu trách nhiệm về nội dung báo cáo trước giảng viên hướng dẫn và nhà trường.
+\end{declaration}
+
+\begin{acknowledgments}
+Để hoàn thành báo cáo cuối kỳ này, em xin bày tỏ lòng biết ơn sâu sắc đến những
+người đã tận tình hướng dẫn và hỗ trợ chúng em trong suốt quá trình học tập và nghiên cứu.
+Trước hết, chúng em xin gửi lời cảm ơn chân thành nhất đến TS. Nguyễn Hải Vinh. Sự hướng dẫn, chỉ bảo tận tình và những góp ý chuyên
+môn sâu sắc của thầy không chỉ giúp chúng em định hướng đúng đắn trong quá trình thực
+hiện báo cáo mà còn khơi gợi niềm say mê, hứng thú với lĩnh vực thiết kế và đánh giá thuật
+toán. Thầy đã kiên nhẫn giải đáp những thắc mắc, đồng thời chia sẻ những kiến thức và kinh
+nghiệm quý báu, giúp chúng em vượt qua những khó khăn và thách thức gặp phải. Sự hỗ trợ
+nhiệt tình và kịp thời của các thầy cô trong việc giải đáp các vấn đề kỹ thuật cũng như cung cấp
+tài liệu tham khảo đã góp phần không nhỏ vào việc hoàn thiện báo cáo này.
+Cuối cùng, nhóm chúng em xin cảm ơn Trường Đại học Khoa học Tự nhiên, Đại học Quốc gia
+Hà Nội đã tạo điều kiện và môi trường học tập tốt nhất để chúng em có thể tiếp thu kiến thức
+và phát triển bản thân.
+Mặc dù đã rất cố gắng, song do kiến thức và thời gian có hạn, báo cáo chắc chắn không tránh
+khỏi những thiếu sót. Chúng em rất mong nhận được những ý kiến đóng góp quý báu từ thầy cô
+và các bạn để báo cáo được hoàn thiện hơn.
+Xin chân thành cảm ơn!\end{acknowledgments}
+
+\begin{abstract}
+Nội dung chính của tiểu luận ...    
+\end{abstract}
+ 
+% Danh sách từ viết tắt
+\nomenclature{CIS}{Computer and Information Science}
+\printnomenclature
+
+\tableofcontents
+% \listoftables
+\listoffigures
+%\listofalgorithms
+
+\mainmatter
+\input{chapters/introduction}
+\input{chapters/background&literature-review}
+\input{chapters/methodology}
+\input{chapters/experimental-setup}
+\input{chapters/results&analysis}
+\input{chapters/discussion}
+\input{chapters/conclusion}
+
+%\rhead{\thepage}  % Sets the right side header to show the page number
+%\lhead{}  % Clears the left side page header
+% \renewcommand{\footrulewidth}{0.4pt}  % not defined for scrlayer-scrpage; commented out
+
+\bibliographystyle{plain} % ieeetr
+\bibliography{refs} 
+
+\end{document}

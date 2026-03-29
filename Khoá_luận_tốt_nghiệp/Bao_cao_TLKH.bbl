@@ -1,0 +1,87 @@
+\begin{thebibliography}{10}
+
+\bibitem{fisher}
+Eirik Fladmark, Muhammad~Hamza Sajjad, and Laura~Brinkholm Justesen.
+\newblock Exploring the performance of pruning methods in neural networks: An
+  empirical study of the lottery ticket hypothesis.
+\newblock 2023.
+\newblock arXiv:2303.15479.
+
+\bibitem{article}
+Jonathan Frankle and Michael Carbin.
+\newblock The lottery ticket hypothesis: Finding sparse, trainable neural
+  networks.
+\newblock 2019.
+\newblock arXiv:1803.03635.
+
+\bibitem{imp}
+Jonathan Frankle and Michael Carbin.
+\newblock The lottery ticket hypothesis: Finding sparse, trainable neural
+  networks.
+\newblock 2019.
+\newblock arXiv:1803.03635.
+
+\bibitem{he2016deep}
+Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun.
+\newblock Deep residual learning for image recognition.
+\newblock In {\em Proceedings of the IEEE Conference on Computer Vision and
+  Pattern Recognition (CVPR)}, pages 770--778, 2016.
+
+\bibitem{hybrid}
+Miko{\l}aj Janusz, Tomasz Wojnar, Yawei Li, Luca Benini, and Kamil Adamczewski.
+\newblock One shot vs. iterative: Rethinking pruning strategies for model
+  compression.
+\newblock 2025.
+\newblock arXiv:2508.13836.
+
+\bibitem{janusz2025}
+Miko{\l}aj Janusz, Tomasz Wojnar, Yawei Li, Luca Benini, and Kamil Adamczewski.
+\newblock One shot vs. iterative: Rethinking pruning strategies for model
+  compression.
+\newblock 2025.
+\newblock arXiv:2508.13836.
+
+\bibitem{krizhevsky2009learning}
+Alex Krizhevsky.
+\newblock Learning multiple layers of features from tiny images.
+\newblock Technical report, University of Toronto, 2009.
+
+\bibitem{lecun1998mnist}
+Yann LeCun.
+\newblock The mnist database of handwritten digits.
+\newblock \url{http://yann.lecun.com/exdb/mnist/}, 1998.
+
+\bibitem{lee2024revisiting}
+Saehyung Lee, Se~Jung Kwon, Byeongwook Kim, and Sungroh Yoon.
+\newblock Revisiting the lottery ticket hypothesis for pre-trained networks.
+\newblock \url{https://openreview.net/forum?id=9ZUz4M55Up}, 2024.
+
+\bibitem{synflow}
+Hidenori Tanaka, Daniel Kunin, Daniel Yamins, and Surya Ganguli.
+\newblock Pruning neural networks without any data by iteratively conserving
+  synaptic flow.
+\newblock 2020.
+\newblock arXiv:2006.05467.
+
+\bibitem{grasp}
+Chaoqi Wang, Guodong Zhang, and Roger Grosse.
+\newblock Picking winning tickets before training by preserving gradient flow.
+\newblock 2020.
+\newblock arXiv:2002.07376.
+
+\bibitem{earlybird}
+Haoran You, Chaojian Li, Pengfei Xu, Yonggan Fu, Yue Wang, Richard~G. Baraniuk,
+  Yingyan Lin, Xiaohan Chen, and Zhangyang Wang.
+\newblock Drawing early-bird tickets: Towards more efficient training of deep
+  networks.
+\newblock In {\em International Conference on Learning Representations (ICLR)},
+  2020.
+\newblock Preprint / ICLR 2020.
+
+\bibitem{deconstructlth}
+Hattie Zhou, Janice Lan, Rosanne Liu, and Jason Yosinski.
+\newblock Deconstructing lottery tickets: Zeros, signs, and the supermask.
+\newblock 2019.
+\newblock arXiv:1905.01067.
+
+\end{thebibliography}

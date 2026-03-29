@@ -1,0 +1,230 @@
+% this package is originally designed by: thanhhungqb@gmail.com
+% more infor mation and update: https://github.com/HungTVo/thesis-template
+% modified @mim.hus 
+% this package also use code from: 
+%	http://tex.stackexchange.com/questions/51483/how-to-write-abstract-and--in-book-format
+% thank for Fredrik M. Kirkemo to givve a useful code
+
+\ProvidesPackage{husthesis}
+
+\RequirePackage{graphicx}
+% \RequirePackage{vietnam}
+\RequirePackage{geometry}
+
+\usepackage{tikz}
+\usetikzlibrary{calc}
+\usepackage{indentfirst}
+
+\usepackage{nomencl}
+\makenomenclature
+\renewcommand{\nomname}{Danh sách từ viết tắt}
+
+% \usepackage{geometry}
+\def\thesislayout{	% A4: 210 × 297
+	\geometry{
+		a4paper,
+		total={155mm,242mm},  % fix over page
+		left=35mm,
+		top=25mm,
+	}
+}
+\renewcommand{\baselinestretch}{1.5}
+
+\addtokomafont{chapter}{\huge\bfseries\normalfont}
+\addtokomafont{section}{\large\bfseries\normalfont\raggedright}
+\addtokomafont{subsection}{\bfseries\normalfont}
+\addtokomafont{disposition}{\normalfont}
+\addtokomafont{chapterentry}{\mdseries}
+
+\AfterTOCHead[toc]{\KOMAoptions{fontsize=13pt}}
+
+
+%\usepackage{titlesec}
+%\titleformat
+%{\chapter} % command
+%[display] % shape
+%{} % format
+%{\centering \huge  Chương \thechapter} % label
+%{0.5ex} % sep
+%{
+%    \vspace{1ex}
+%    \centering \huge 
+%} % before-code
+%[
+%\vspace{-0.5ex}%
+%] % after-code
+
+\newcommand{\@sdeptname}{KHOA TOÁN - CƠ - TIN HỌC}
+\newcommand{\csdeptname}[1]{\renewcommand{\@sdeptname}{#1}}
+
+\newcommand{\@tname}{TÊN ĐỀ TÀI KHOÁ LUẬN}
+\newcommand{\ctname}[1]{\renewcommand{\@tname}{#1}}
+
+\newcommand{\@stuname}{SVTH 1: Nguyễn Văn An (5...) }
+\newcommand{\cstuname}[1]{\renewcommand{\@stuname}{#1}}
+
+\newcommand{\@sMajor}{Máy tính và Khoa học thông tin}
+\newcommand{\csMajor}[1]{\renewcommand{\@sMajor}{#1}}
+
+\newcommand{\@sProgram}{chuẩn}
+\newcommand{\csProgram}[1]{\renewcommand{\@sProgram}{#1}}
+	
+\newcommand{\@sSupervise}{TS. Nguyễn Văn A}
+\newcommand{\csSupervise}[1]{\renewcommand{\@sSupervise}{#1}}
+
+\newcommand{\@ttime}{\today}
+\newcommand{\cttime}[1]{\renewcommand{\@ttime}{#1}}
+
+\newcommand{\@rname}{Khoá luận tốt nghiệp đại học hệ chính quy} % report name, luận văn, thực tập...
+\newcommand{\crname}[1]{\renewcommand{\@rname}{#1}}
+
+\newsavebox\thesmashminipage
+\newenvironment{smashminipage}
+  {\begin{lrbox}{\thesmashminipage}\begin{minipage}[t]{\textwidth}}
+  {\end{minipage}\end{lrbox}\smash{\usebox{\thesmashminipage}}\clearpage}
+
+\def\coverpage{
+\pagestyle{empty}
+% \setlength{\oddsidemargin}{0cm}
+% \addtolength{\voffset}{-2.5cm}
+% \addtolength{\textwidth}{-2cm}
+
+% \fbox{
+\begin{smashminipage}%[b][25.5cm][t]{15cm}
+\begin{tikzpicture}[remember picture, overlay]
+%   \draw[line width = 4pt] ($(current page.north west) + (1in,-1in)$) rectangle ($(current page.south east) + (-1in,1in)$);
+\draw [line width=1pt]
+    ($ (current page.north west) + (2.0cm,-2.0cm) $)
+    rectangle
+    ($ (current page.south east) + (-1.5cm,1.5cm) $);
+\draw [line width=3pt]
+    ($ (current page.north west) + (2.15cm,-2.15cm) $)
+    rectangle
+    ($ (current page.south east) + (-1.65cm,1.65cm) $); 
+\end{tikzpicture}
+
+\begin{center}
+{\fontsize{13}{1}\selectfont
+ĐẠI HỌC QUỐC GIA HÀ NỘI\\
+TRƯỜNG ĐẠI HỌC KHOA HỌC TỰ NHIÊN\\
+\textbf{\@sdeptname}
+}\\
+\vspace{3.5cm}
+{\fontsize{14}{1}\selectfont \textbf{\@stuname}}
+
+\vspace{2cm}
+
+  {\fontsize{18}{1}\selectfont \textbf{\@tname} }
+\vspace{5cm}  
+  
+ {\fontsize{14}{1}\selectfont \@rname  \\[6pt]
+ 	Ngành: \@sMajor \\[6pt]
+	(Chương trình đào tạo \@sProgram)\\ 
+     
+}
+ 
+\vspace{5.5cm}
+ 
+ {\fontsize{14}{1}\selectfont  \textbf{ Hà Nội - \@ttime } }\\
+
+\end{center}
+
+\end{smashminipage}
+}
+
+
+\def\secondcoverpage{
+
+\pagestyle{empty}
+% \setlength{\oddsidemargin}{0cm}
+% \addtolength{\voffset}{-2.5cm}
+% \addtolength{\textwidth}{-2cm}
+
+% \fbox{
+\begin{smashminipage}%[b][25.5cm][t]{15cm}
+\begin{tikzpicture}[remember picture, overlay]
+%   \draw[line width = 4pt] ($(current page.north west) + (1in,-1in)$) rectangle ($(current page.south east) + (-1in,1in)$);
+\draw [line width=1pt]
+    ($ (current page.north west) + (3.0cm,-2.0cm) $)
+    rectangle
+    ($ (current page.south east) + (-1.5cm,1.5cm) $);
+\draw [line width=3pt]
+    ($ (current page.north west) + (3.15cm,-2.15cm) $)
+    rectangle
+    ($ (current page.south east) + (-1.65cm,1.65cm) $); 
+\end{tikzpicture}
+
+\begin{center}
+{\fontsize{13}{1}\selectfont
+ĐẠI HỌC QUỐC GIA HÀ NỘI\\
+TRƯỜNG ĐẠI HỌC KHOA HỌC TỰ NHIÊN\\
+\textbf{\@sdeptname}
+}\\
+\vspace{3.5cm}
+{\fontsize{14}{1}\selectfont \textbf{\@stuname}}
+
+\vspace{2cm}
+
+  {\fontsize{18}{1}\selectfont \textbf{\@tname} }
+\vspace{4cm}  
+  
+ {\fontsize{14}{1}\selectfont \@rname  \\[6pt]
+ 	Ngành: \@sMajor \\[6pt]
+	(Chương trình đào tạo \@sProgram)\\ 
+     
+}
+\vspace{2cm}
+
+{\fontsize{14}{1}\selectfont	\textbf{Người hướng dẫn:  {\@sSupervise} \\	
+}} 
+ 
+ 
+\vspace{4cm}
+ 
+ {\fontsize{14}{1}\selectfont \textbf{ Hà Nội - \@ttime } }\\
+
+\end{center}
+
+\end{smashminipage}
+}
+
+
+\def\makeprintversion{}
+
+%% Remember to load babel before loading this package or define the command \abstractname!
+\makeatletter
+ \newenvironment{abstract}{
+   \titlepage
+   \null\vfil
+   \@beginparpenalty\@lowpenalty
+   \begin{center}
+ 	\bfseries \Large Tóm tắt nội dung
+ 	\@endparpenalty\@M
+   \end{center}}
+  {\par\vfil\null\endtitlepage}
+\makeatother
+
+\makeatletter
+\newenvironment{acknowledgments}{
+	\titlepage \null\vfil
+	 
+	\begin{center}
+	  {\Large\bfseries {\fontsize{24}{1}\selectfont Lời cảm ơn } \vspace{-.5em}\vspace{\z@}}
+	\end{center}
+	\quotation
+  }{}
+\makeatother
+
+% Declaration
+\makeatletter
+\newenvironment{declaration}{
+ 	
+	\begin{center}
+ 	  {\Large\bfseries Lời cam đoan\vspace{-.5em}\vspace{\z@}}
+ 	\end{center}
+ 	\quotation
+   }{}
+\makeatother	  
+
+% \renewcommand\lstlistingname{Algorithm}
+% \renewcommand\lstlistlistingname{Algorithms}
