@@ -433,6 +433,17 @@ def _finetune(
     )
     best_state = initial_best_state
 
+    # Resume edge-case: checkpoint may point to a fine-tuning stage where the
+    # final epoch has already completed (e.g., ft_epoch=max_epochs-1).
+    # In that case there is nothing left to train for this phase.
+    if start_epoch >= max_epochs:
+        if best_state is not None:
+            model.load_state_dict(best_state)
+        history["epochs_run"] = 0
+        history["start_epoch"] = start_epoch
+        history["best_test_acc"] = best_test_acc
+        return history
+
     # ---- Build effective criterion and register KD hook ONCE (outside loop) ----
     # Re-creating the hook and the closure every epoch wastes memory and time.
     if teacher_model is not None:
@@ -538,7 +549,7 @@ def _finetune(
     if best_state is not None:
         model.load_state_dict(best_state)
 
-    history["epochs_run"] = epoch + 1  # type: ignore[possibly-undefined]
+    history["epochs_run"] = len(history["test_accs"])
     history["start_epoch"] = start_epoch
     history["best_test_acc"] = best_test_acc
     return history
