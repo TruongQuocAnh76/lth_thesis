@@ -1371,6 +1371,8 @@ def hybrid_pruning(
     # ------------------------------------------------------------------ #
     # Summary
     # ------------------------------------------------------------------ #
+    results["masks"] = masks
+
     total_time = _elapsed()
     final_sparsity = get_overall_sparsity(masks)
     _, final_test_acc = evaluate(model, test_loader, criterion, device)
