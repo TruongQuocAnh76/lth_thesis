@@ -1398,7 +1398,7 @@ def hybrid_pruning(
         num_classes=num_classes,
         dataset_name=dataset_name,
         device=device,
-        final_state_dict=model.state_dict(),
+        final_state_dict=raw_model.state_dict(),
         masks=results["masks"],
         mask_applier=apply_masks_to_model,
     )
