@@ -26,7 +26,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from src.model import get_model, count_parameters
 from src.data import get_dataloaders
-from src.train import train_epochs, evaluate
+from src.train import train_epoch, train_epochs, evaluate
 from src.metrics import compute_efficiency_metrics
 from src.pruning import (
     create_initial_masks,
@@ -88,7 +88,10 @@ class IMPExperiment:
         device: str = "cuda",
         save_dir: str = "./results",
         use_global_pruning: bool = True,
-        warmup_epochs: int = 5
+        warmup_epochs: int = 5,
+        resume_from: Optional[str] = None,
+        time_limit_seconds: Optional[float] = None,
+        checkpoint_interval: int = 10,
     ):
         """Initialize IMP experiment.
         
@@ -108,6 +111,9 @@ class IMPExperiment:
             save_dir: Directory to save results
             use_global_pruning: If True, use global magnitude pruning; else per-layer
             warmup_epochs: Number of warmup epochs
+            resume_from: Optional path to an IMP checkpoint to resume from
+            time_limit_seconds: Optional wall-clock limit before auto-checkpointing
+            checkpoint_interval: Save a checkpoint every N training epochs
         """
         self.model_name = model_name
         self.dataset_name = dataset_name
@@ -124,6 +130,14 @@ class IMPExperiment:
         self.save_dir = Path(save_dir)
         self.use_global_pruning = use_global_pruning
         self.warmup_epochs = warmup_epochs
+        self.resume_from = resume_from
+        self.time_limit_seconds = time_limit_seconds
+        self.checkpoint_interval = checkpoint_interval
+        experiment_name = (
+            f"imp_{self.model_name}_{self.dataset_name}"
+            f"_s{self.target_sparsity}_seed{self.seed}"
+        )
+        self._ckpt_dir = self.save_dir / "imp" / experiment_name / "checkpoints"
         
         # Calculate per-iteration pruning rate to achieve target sparsity
         # After n iterations: (1 - rate)^n = (1 - target_sparsity)
@@ -153,7 +167,11 @@ class IMPExperiment:
             'weight_decay': self.weight_decay,
             'seed': self.seed,
             'use_global_pruning': self.use_global_pruning,
-            'prune_rate_per_iteration': self.prune_rate_per_iteration
+            'warmup_epochs': self.warmup_epochs,
+            'prune_rate_per_iteration': self.prune_rate_per_iteration,
+            'resume_from': self.resume_from,
+            'time_limit_seconds': self.time_limit_seconds,
+            'checkpoint_interval': self.checkpoint_interval,
         }
     
     def _create_model(self) -> nn.Module:
@@ -173,6 +191,124 @@ class IMPExperiment:
     def _create_scheduler(self, optimizer: optim.Optimizer) -> Any:
         """Create learning rate scheduler."""
         return CosineAnnealingLR(optimizer, T_max=self.epochs_per_iteration)
+
+    def _checkpoint_path(self) -> Path:
+        """Return the canonical IMP checkpoint path."""
+        return self._ckpt_dir / "imp_checkpoint.pt"
+
+    @staticmethod
+    def _masks_to_torch(masks: Dict[str, np.ndarray]) -> Dict[str, torch.Tensor]:
+        """Convert NumPy masks to tensors for checkpoint serialization."""
+        return {
+            k: torch.from_numpy(v) if isinstance(v, np.ndarray) else v
+            for k, v in masks.items()
+        }
+
+    @staticmethod
+    def _masks_to_numpy(masks: Dict[str, Any]) -> Dict[str, np.ndarray]:
+        """Convert checkpoint mask payloads back to NumPy arrays."""
+        return {
+            k: v.cpu().numpy() if isinstance(v, torch.Tensor) else v
+            for k, v in masks.items()
+        }
+
+    def _empty_iteration_history(self) -> Dict[str, List[float]]:
+        """Create an empty per-iteration training history."""
+        return {
+            'train_losses': [],
+            'train_accs': [],
+            'test_losses': [],
+            'test_accs': [],
+        }
+
+    def _move_optimizer_state_to_device(self, optimizer: optim.Optimizer):
+        """Move optimizer state tensors to the active device after loading."""
+        for state in optimizer.state.values():
+            for key, value in state.items():
+                if isinstance(value, torch.Tensor):
+                    state[key] = value.to(self.device)
+
+    def _save_checkpoint(
+        self,
+        model: nn.Module,
+        optimizer: optim.Optimizer,
+        scheduler: Any,
+        iteration: int,
+        epoch: int,
+        current_sparsity: float,
+        masks: Dict[str, np.ndarray],
+        initial_state_dict: Dict[str, Any],
+        iteration_history: Dict[str, List[float]],
+        elapsed_training_seconds: float,
+    ) -> Path:
+        """Save the active IMP iteration so the run can resume later."""
+        ckpt_path = self._checkpoint_path()
+        ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+        ckpt = {
+            'phase': 'imp',
+            'iteration': iteration,
+            'epoch': epoch,
+            'current_sparsity': current_sparsity,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
+            'masks': self._masks_to_torch(masks),
+            'initial_state_dict': initial_state_dict,
+            'results': copy.deepcopy(self.results),
+            'iteration_history': copy.deepcopy(iteration_history),
+            'elapsed_training_seconds': elapsed_training_seconds,
+        }
+        torch.save(ckpt, ckpt_path)
+        print(
+            f"\n  IMP checkpoint saved -> {ckpt_path} "
+            f"(iteration {iteration}/{self.num_iterations}, "
+            f"epoch {epoch + 1}/{self.epochs_per_iteration})"
+        )
+        return ckpt_path
+
+    @staticmethod
+    def _load_checkpoint(path: str | Path) -> Dict[str, Any]:
+        """Load a previously saved IMP checkpoint."""
+        return torch.load(Path(path), map_location='cpu', weights_only=False)
+
+    def _time_remaining(self, start: float) -> Optional[float]:
+        """Seconds remaining before the configured wall-clock limit."""
+        if self.time_limit_seconds is None:
+            return None
+        return self.time_limit_seconds - (time.time() - start)
+
+    def _should_stop(self, start: float, margin: float = 180.0) -> bool:
+        """True when we are close enough to the time limit to stop safely."""
+        remaining = self._time_remaining(start)
+        if remaining is None:
+            return False
+        return remaining < margin
+
+    def _build_iteration_result(
+        self,
+        iteration: int,
+        current_sparsity: float,
+        test_loss: float,
+        test_acc: float,
+        history: Dict[str, List[float]],
+        masks: Dict[str, np.ndarray],
+    ) -> Dict[str, Any]:
+        """Package one IMP pruning iteration's metrics."""
+        return {
+            'iteration': iteration,
+            'sparsity': current_sparsity,
+            'remaining_weights_fraction': 1 - current_sparsity,
+            'test_accuracy': test_acc,
+            'test_loss': test_loss,
+            'train_losses': history['train_losses'],
+            'train_accs': history['train_accs'],
+            'test_losses': history['test_losses'],
+            'test_accs': history['test_accs'],
+            'train_accuracy_final': history['train_accs'][-1] if history['train_accs'] else 0,
+            'train_loss_final': history['train_losses'][-1] if history['train_losses'] else 0,
+            'best_test_accuracy': max(history['test_accs']) if history['test_accs'] else test_acc,
+            'layer_sparsities': get_sparsity(masks),
+        }
     
     def run(self) -> Dict[str, Any]:
         """Run the complete IMP experiment.
@@ -186,6 +322,13 @@ class IMPExperiment:
         print(f"Target Sparsity: {self.target_sparsity:.1%}")
         print(f"Pruning Iterations: {self.num_iterations}")
         print(f"Device: {self.device}")
+        if self.resume_from:
+            print(f"Resuming from: {self.resume_from}")
+        if self.time_limit_seconds:
+            print(
+                f"Time limit: {self.time_limit_seconds:.0f}s "
+                f"({self.time_limit_seconds / 3600:.1f}h)"
+            )
         print(f"{'='*60}\n")
         
         # Set random seed
@@ -206,75 +349,191 @@ class IMPExperiment:
         model = self._create_model()
         param_count = count_parameters(model)
         print(f"Model parameters: {param_count['total']:,}")
-        
-        # Store initial weights (the "lottery ticket" initialization)
-        initial_weights = get_prunable_layers(model)
-        initial_state_dict = copy.deepcopy(model.state_dict())
-        self.initial_model_state_dict = initial_state_dict  # Save for later
-        
-        # Create initial masks (all ones = no pruning)
-        masks = create_initial_masks(initial_weights)
-        
+
         # Loss function
         criterion = nn.CrossEntropyLoss()
-        
-        # Measure total training computational cost
-        overall_start_time = time.time()
 
-        # Run iterative magnitude pruning
-        for iteration in range(self.num_iterations + 1):
+        # Fresh run defaults
+        initial_state_dict = copy.deepcopy(model.state_dict())
+        self.initial_model_state_dict = copy.deepcopy(initial_state_dict)
+        initial_weights = get_prunable_layers(model)
+        masks = create_initial_masks(initial_weights)
+        start_iteration = 0
+        start_epoch = 0
+        prior_training_seconds = 0.0
+        iteration_history = self._empty_iteration_history()
+        resume_ckpt = None
+
+        if self.resume_from and Path(self.resume_from).is_file():
+            resume_ckpt = self._load_checkpoint(self.resume_from)
+            initial_state_dict = copy.deepcopy(resume_ckpt['initial_state_dict'])
+            self.initial_model_state_dict = copy.deepcopy(initial_state_dict)
+            masks = self._masks_to_numpy(resume_ckpt['masks'])
+            start_iteration = int(resume_ckpt.get('iteration', 0))
+            start_epoch = int(resume_ckpt.get('epoch', -1)) + 1
+            prior_training_seconds = float(
+                resume_ckpt.get('elapsed_training_seconds', 0.0)
+            )
+            iteration_history = copy.deepcopy(
+                resume_ckpt.get('iteration_history', self._empty_iteration_history())
+            )
+            self.results = copy.deepcopy(resume_ckpt.get('results', self.results))
+            self.results['config'] = self._get_config_dict()
+            self.results.setdefault('iterations', [])
+            self.results['final_results'] = {}
+            model.load_state_dict(resume_ckpt['model_state_dict'])
+            apply_masks_to_model(model, masks)
+            print(
+                f"Loaded IMP checkpoint at iteration {start_iteration}/"
+                f"{self.num_iterations}, epoch "
+                f"{min(start_epoch, self.epochs_per_iteration)}/"
+                f"{self.epochs_per_iteration}"
+            )
+
+        wall_start = time.time()
+        loop_start = time.time()
+        stopped_early = False
+
+        for iteration in range(start_iteration, self.num_iterations + 1):
             print(f"\n{'='*40}")
             print(f"Pruning Iteration {iteration}/{self.num_iterations}")
             current_sparsity = get_overall_sparsity(masks)
             print(f"Current Sparsity: {current_sparsity:.2%}")
             print(f"{'='*40}")
-            
-            # Reset model to initial weights and apply current mask
-            model.load_state_dict(copy.deepcopy(initial_state_dict))
-            apply_masks_to_model(model, masks)
-            
-            # Create fresh optimizer and scheduler
-            optimizer = self._create_optimizer(model)
-            scheduler = self._create_scheduler(optimizer)
-            
-            # Create mask application function
-            apply_mask_fn = create_mask_apply_fn(model)
-            
-            # Train
-            print(f"Training for {self.epochs_per_iteration} epochs...")
-            history = train_epochs(
-                model=model,
-                train_loader=train_loader,
-                test_loader=test_loader,
-                criterion=criterion,
-                optimizer=optimizer,
-                num_epochs=self.epochs_per_iteration,
-                device=self.device,
-                scheduler=scheduler,
-                masks=masks,
-                apply_mask_fn=apply_mask_fn,
-                verbose=True
+
+            resuming_iteration = (
+                resume_ckpt is not None
+                and iteration == start_iteration
+                and start_epoch > 0
             )
-            
-            # Evaluate final accuracy
-            test_loss, test_acc = evaluate(model, test_loader, criterion, self.device)
-            
-            # Store iteration results
-            iteration_result = {
-                'iteration': iteration,
-                'sparsity': current_sparsity,
-                'remaining_weights_fraction': 1 - current_sparsity,
-                'test_accuracy': test_acc,
-                'test_loss': test_loss,
-                'train_losses': history['train_losses'],
-                'train_accs': history['train_accs'],
-                'test_losses': history['test_losses'],
-                'test_accs': history['test_accs'],
-                'train_accuracy_final': history['train_accs'][-1] if history['train_accs'] else 0,
-                'train_loss_final': history['train_losses'][-1] if history['train_losses'] else 0,
-                'best_test_accuracy': max(history['test_accs']) if history['test_accs'] else test_acc,
-                'layer_sparsities': get_sparsity(masks)
-            }
+
+            if resuming_iteration:
+                optimizer = self._create_optimizer(model)
+                scheduler = self._create_scheduler(optimizer)
+                optimizer.load_state_dict(resume_ckpt['optimizer_state_dict'])
+                if resume_ckpt.get('scheduler_state_dict') is not None:
+                    scheduler.load_state_dict(resume_ckpt['scheduler_state_dict'])
+                self._move_optimizer_state_to_device(optimizer)
+                history = copy.deepcopy(iteration_history)
+                epoch_start = start_epoch
+                if epoch_start < self.epochs_per_iteration:
+                    print(
+                        f"Resuming training from epoch "
+                        f"{epoch_start + 1}/{self.epochs_per_iteration}..."
+                    )
+                else:
+                    print("Checkpoint captured after the final epoch; finalizing iteration...")
+            else:
+                model.load_state_dict(copy.deepcopy(initial_state_dict))
+                apply_masks_to_model(model, masks)
+                optimizer = self._create_optimizer(model)
+                scheduler = self._create_scheduler(optimizer)
+                history = self._empty_iteration_history()
+                epoch_start = 0
+                print(f"Training for {self.epochs_per_iteration} epochs...")
+
+            apply_mask_fn = create_mask_apply_fn(model)
+            pbar = tqdm(
+                range(epoch_start, self.epochs_per_iteration),
+                desc=f"IMP Iter {iteration}",
+                disable=False,
+            )
+
+            for epoch in pbar:
+                train_loss, train_acc = train_epoch(
+                    model=model,
+                    train_loader=train_loader,
+                    criterion=criterion,
+                    optimizer=optimizer,
+                    device=self.device,
+                    masks=masks,
+                    apply_mask_fn=apply_mask_fn,
+                )
+                test_loss, test_acc = evaluate(model, test_loader, criterion, self.device)
+
+                if scheduler is not None:
+                    scheduler.step()
+
+                history['train_losses'].append(train_loss)
+                history['train_accs'].append(train_acc)
+                history['test_losses'].append(test_loss)
+                history['test_accs'].append(test_acc)
+
+                pbar.set_postfix(
+                    train_loss=f"{train_loss:.4f}",
+                    train_acc=f"{train_acc:.2f}%",
+                    test_acc=f"{test_acc:.2f}%",
+                )
+
+                if (
+                    self.checkpoint_interval > 0
+                    and (epoch + 1) % self.checkpoint_interval == 0
+                ):
+                    elapsed_training_seconds = (
+                        prior_training_seconds + (time.time() - loop_start)
+                    )
+                    self._save_checkpoint(
+                        model=model,
+                        optimizer=optimizer,
+                        scheduler=scheduler,
+                        iteration=iteration,
+                        epoch=epoch,
+                        current_sparsity=current_sparsity,
+                        masks=masks,
+                        initial_state_dict=initial_state_dict,
+                        iteration_history=history,
+                        elapsed_training_seconds=elapsed_training_seconds,
+                    )
+
+                if self._should_stop(wall_start, margin=180.0):
+                    elapsed_training_seconds = (
+                        prior_training_seconds + (time.time() - loop_start)
+                    )
+                    ckpt_path = self._save_checkpoint(
+                        model=model,
+                        optimizer=optimizer,
+                        scheduler=scheduler,
+                        iteration=iteration,
+                        epoch=epoch,
+                        current_sparsity=current_sparsity,
+                        masks=masks,
+                        initial_state_dict=initial_state_dict,
+                        iteration_history=history,
+                        elapsed_training_seconds=elapsed_training_seconds,
+                    )
+                    remaining = self._time_remaining(wall_start)
+                    print(
+                        f"\nTime limit approaching ({remaining:.0f}s left). "
+                        f"Saved IMP checkpoint at {ckpt_path}."
+                    )
+                    stopped_early = True
+                    break
+
+            if stopped_early:
+                total_training_seconds = prior_training_seconds + (time.time() - loop_start)
+                self.results['final_results'] = {
+                    'completed': False,
+                    'stopped_early': True,
+                    'checkpoint_path': str(self._checkpoint_path()),
+                    'training_computational_cost_seconds': total_training_seconds,
+                    'last_completed_iteration': iteration - 1,
+                }
+                return self.results
+
+            if history['test_losses']:
+                test_loss = history['test_losses'][-1]
+                test_acc = history['test_accs'][-1]
+            else:
+                test_loss, test_acc = evaluate(model, test_loader, criterion, self.device)
+
+            iteration_result = self._build_iteration_result(
+                iteration=iteration,
+                current_sparsity=current_sparsity,
+                test_loss=test_loss,
+                test_acc=test_acc,
+                history=history,
+                masks=masks,
+            )
             self.results['iterations'].append(iteration_result)
             
             print(f"\nIteration {iteration} Results:")
@@ -297,6 +556,10 @@ class IMPExperiment:
                     # Per-layer magnitude pruning
                     prune_percents = {k: self.prune_rate_per_iteration for k in masks.keys()}
                     masks = prune_by_percent(prune_percents, masks, trained_weights)
+
+            resume_ckpt = None
+            start_epoch = 0
+            iteration_history = self._empty_iteration_history()
         
         # Final results
         final_sparsity = get_overall_sparsity(masks)
@@ -315,8 +578,7 @@ class IMPExperiment:
         )
 
         # Training computational cost
-        overall_end_time = time.time()
-        total_training_seconds = overall_end_time - overall_start_time
+        total_training_seconds = prior_training_seconds + (time.time() - loop_start)
 
         self.results['train_history'] = {
             'iterations': [
@@ -348,7 +610,7 @@ class IMPExperiment:
 
         # Store final model state and masks for saving
         self.final_model_state_dict = copy.deepcopy(model.state_dict())
-        self.final_masks = masks
+        self.final_masks = copy.deepcopy(masks)
 
         # Save results
         self._save_results()
@@ -465,7 +727,10 @@ def run_imp_experiment(
     epochs: int = 160,
     seed: int = 42,
     device: str = "cuda",
-    save_dir: str = "./results"
+    save_dir: str = "./results",
+    resume_from: Optional[str] = None,
+    time_limit_seconds: Optional[float] = None,
+    checkpoint_interval: int = 10,
 ) -> Dict[str, Any]:
     """Convenience function to run a single IMP experiment.
     
@@ -478,6 +743,9 @@ def run_imp_experiment(
         seed: Random seed
         device: Compute device
         save_dir: Results directory
+        resume_from: Optional path to an IMP checkpoint to resume from
+        time_limit_seconds: Optional wall-clock limit before auto-checkpointing
+        checkpoint_interval: Save a checkpoint every N training epochs
         
     Returns:
         Experiment results dictionary
@@ -493,7 +761,10 @@ def run_imp_experiment(
         epochs_per_iteration=epochs,
         seed=seed,
         device=device,
-        save_dir=save_dir
+        save_dir=save_dir,
+        resume_from=resume_from,
+        time_limit_seconds=time_limit_seconds,
+        checkpoint_interval=checkpoint_interval,
     )
     
     return experiment.run()
@@ -2809,6 +3080,9 @@ def run_experiment(
             - weight_decay (float): Weight decay (default: 5e-4)
             - use_global_pruning (bool): Global vs layerwise pruning (default: True)
             - warmup_epochs (int): Warmup epochs (default: 5)
+            - resume_from (str | None): Optional IMP checkpoint path
+            - time_limit_seconds (float | None): Optional wall-clock limit
+            - checkpoint_interval (int): Save a checkpoint every N epochs
             
         Early-Bird (VGG):
             - target_sparsity (float): Target channel sparsity (default: 0.5)
@@ -2849,6 +3123,9 @@ def run_experiment(
         weight_decay = kwargs.get('weight_decay', 5e-4)
         use_global_pruning = kwargs.get('use_global_pruning', True)
         warmup_epochs = kwargs.get('warmup_epochs', 5)
+        resume_from = kwargs.get('resume_from', None)
+        time_limit_seconds = kwargs.get('time_limit_seconds', None)
+        checkpoint_interval = kwargs.get('checkpoint_interval', 10)
         
         # Determine number of classes from dataset
         num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
@@ -2867,7 +3144,10 @@ def run_experiment(
             seed=seed,
             device=device,
             use_global_pruning=use_global_pruning,
-            warmup_epochs=warmup_epochs
+            warmup_epochs=warmup_epochs,
+            resume_from=resume_from,
+            time_limit_seconds=time_limit_seconds,
+            checkpoint_interval=checkpoint_interval,
         )
         return experiment.run()
     
@@ -3533,18 +3813,18 @@ Examples:
     ga_group.add_argument("--no_post_prune", action="store_true", default=False,
                          help="Disable post-evolutionary pruning")
 
-    # Checkpoint / resume arguments (for GA on Kaggle etc.)
+    # Checkpoint / resume arguments
     ckpt_group = parser.add_argument_group('Checkpoint / resume arguments')
     ckpt_group.add_argument("--resume_from", type=str, default=None,
                            help="Path to a checkpoint file to resume from "
-                                "(GA or training phase)")
+                                "(IMP, GA, Hybrid, or training phase)")
     ckpt_group.add_argument("--time_limit", type=float, default=None,
                            help="Wall-clock time limit in seconds. The experiment "
                                 "will auto-save a checkpoint before this deadline. "
                                 "E.g. 39600 for Kaggle 11-hour safety margin")
     ckpt_group.add_argument("--checkpoint_interval", type=int, default=10,
-                           help="Save a checkpoint every N GA generations / "
-                                "training epochs (default: 10)")
+                           help="Save a checkpoint every N epochs / stages "
+                                "depending on the algorithm (default: 10)")
 
     # SynFlow-specific arguments
     synflow_group = parser.add_argument_group('SynFlow arguments')
@@ -3615,6 +3895,9 @@ Examples:
             kwargs['warmup_epochs'] = args.warmup_epochs
             kwargs['batch_size'] = args.batch_size if args.batch_size else 128
             kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 5e-4
+            kwargs['resume_from'] = args.resume_from
+            kwargs['time_limit_seconds'] = args.time_limit
+            kwargs['checkpoint_interval'] = args.checkpoint_interval
             
         elif args.algorithm == "earlybird":
             kwargs['target_sparsity'] = args.target_sparsity
