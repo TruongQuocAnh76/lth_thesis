@@ -9,3 +9,27 @@ __pycache__/
 data/
 
 .vscode
+
+Khoá_luận_tốt_nghiệp/*.acn
+Khoá_luận_tốt_nghiệp/*.aux
+Khoá_luận_tốt_nghiệp/*.bcf
+Khoá_luận_tốt_nghiệp/*.bbl
+Khoá_luận_tốt_nghiệp/*.blg
+Khoá_luận_tốt_nghiệp/*.fdb_latexmk
+Khoá_luận_tốt_nghiệp/*.fls
+Khoá_luận_tốt_nghiệp/*.glg
+Khoá_luận_tốt_nghiệp/*.glo
+Khoá_luận_tốt_nghiệp/*.gls
+Khoá_luận_tốt_nghiệp/*.idx
+Khoá_luận_tốt_nghiệp/*.ilg
+Khoá_luận_tốt_nghiệp/*.ind
+Khoá_luận_tốt_nghiệp/*.ist
+Khoá_luận_tốt_nghiệp/*.lof
+Khoá_luận_tốt_nghiệp/*.log
+Khoá_luận_tốt_nghiệp/*.nlo
+Khoá_luận_tốt_nghiệp/*.nls
+Khoá_luận_tốt_nghiệp/*.out
+Khoá_luận_tốt_nghiệp/*.pdf
+Khoá_luận_tốt_nghiệp/*.run.xml
+Khoá_luận_tốt_nghiệp/*.synctex.gz
+Khoá_luận_tốt_nghiệp/*.toc
