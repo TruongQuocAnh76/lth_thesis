@@ -10,6 +10,7 @@ import json
 import copy
 import time
 import datetime
+import shutil
 import numpy as np
 import torch
 import torch.nn as nn
@@ -2970,6 +2971,129 @@ def _ensure_efficiency_metric_keys(final_results: Dict[str, Any]) -> Dict[str, A
     return final_results
 
 
+def _to_numpy_masks(mask_payload: Dict[str, Any]) -> Dict[str, np.ndarray]:
+    """Convert loaded mask payloads to NumPy arrays."""
+    masks_np: Dict[str, np.ndarray] = {}
+    for name, mask in mask_payload.items():
+        if isinstance(mask, torch.Tensor):
+            masks_np[name] = mask.detach().cpu().numpy()
+        elif isinstance(mask, np.ndarray):
+            masks_np[name] = mask
+        else:
+            masks_np[name] = np.asarray(mask)
+    return masks_np
+
+
+def _resolve_num_classes(
+    dataset_name: str,
+    config: Dict[str, Any],
+    override_num_classes: Optional[int] = None,
+) -> int:
+    """Resolve number of classes from override, config, or dataset convention."""
+    if override_num_classes is not None:
+        return int(override_num_classes)
+
+    config_num_classes = config.get("num_classes")
+    if config_num_classes is not None:
+        return int(config_num_classes)
+
+    dataset_key = dataset_name.lower()
+    if dataset_key in {"cifar10", "mnist"}:
+        return 10
+    if dataset_key in {"cifar100"}:
+        return 100
+    raise ValueError(
+        "Unable to infer `num_classes` from dataset/config. "
+        "Please pass `--override_num_classes`."
+    )
+
+
+def recompute_efficiency_metrics_for_existing_run(
+    *,
+    result_dir: str,
+    device: str = "cuda",
+    override_model_name: Optional[str] = None,
+    override_dataset_name: Optional[str] = None,
+    override_num_classes: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Backfill canonical efficiency metrics for an existing experiment output."""
+    run_dir = Path(result_dir).expanduser().resolve()
+    if not run_dir.is_dir():
+        raise FileNotFoundError(f"Result directory does not exist: {run_dir}")
+
+    results_path = run_dir / "results.json"
+    final_model_path = run_dir / "final_model.pt"
+    final_masks_path = run_dir / "final_masks.pt"
+    for path in (results_path, final_model_path, final_masks_path):
+        if not path.is_file():
+            raise FileNotFoundError(f"Required artifact missing: {path}")
+
+    with open(results_path, "r") as f:
+        results = json.load(f)
+
+    config = results.get("config", {})
+    model_name = override_model_name or config.get("model_name")
+    dataset_name = override_dataset_name or config.get("dataset_name")
+    if not model_name or not dataset_name:
+        raise ValueError(
+            "Missing model/dataset in results config. "
+            "Provide --override_model_name and --override_dataset_name."
+        )
+    num_classes = _resolve_num_classes(dataset_name, config, override_num_classes)
+
+    requested_device = torch.device(device)
+    if requested_device.type == "cuda" and not torch.cuda.is_available():
+        print("CUDA requested but unavailable; falling back to CPU for metric recomputation.")
+        requested_device = torch.device("cpu")
+
+    final_state_payload = torch.load(final_model_path, map_location="cpu", weights_only=False)
+    if isinstance(final_state_payload, dict) and "state_dict" in final_state_payload:
+        final_state_dict = final_state_payload["state_dict"]
+    elif isinstance(final_state_payload, dict):
+        final_state_dict = final_state_payload
+    else:
+        raise ValueError(f"Unexpected model payload format at {final_model_path}")
+
+    masks_payload = torch.load(final_masks_path, map_location="cpu", weights_only=False)
+    if not isinstance(masks_payload, dict):
+        raise ValueError(f"Unexpected mask payload format at {final_masks_path}")
+    masks_np = _to_numpy_masks(masks_payload)
+
+    efficiency_metrics = compute_efficiency_metrics(
+        model_name=model_name,
+        num_classes=num_classes,
+        dataset_name=dataset_name,
+        device=requested_device,
+        final_state_dict=final_state_dict,
+        masks=masks_np,
+        mask_applier=apply_masks_to_model,
+    )
+
+    final_results = dict(results.get("final_results", {}))
+    final_results.update(efficiency_metrics)
+    if final_results.get("training_computational_cost_seconds") is None:
+        final_results["training_computational_cost_seconds"] = final_results.get(
+            "total_time_seconds"
+        )
+    results["final_results"] = _ensure_efficiency_metric_keys(final_results)
+
+    backup_path = run_dir / f"results_before_metrics_recompute_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    shutil.copy2(results_path, backup_path)
+
+    with open(results_path, "w") as f:
+        json.dump(_convert_to_serializable(results), f, indent=2)
+
+    print(f"Metrics recomputed and saved to: {results_path}")
+    print(f"Backup created at: {backup_path}")
+
+    return {
+        "run_dir": str(run_dir),
+        "results_path": str(results_path),
+        "backup_path": str(backup_path),
+        "final_results": results["final_results"],
+    }
+
+
 def _save_multiphase_summary_csv(path: Path, phases: List[Tuple[str, Dict[str, Any]]]) -> None:
     """Save epoch-by-epoch metrics for one or more training phases."""
     import csv
@@ -3062,7 +3186,9 @@ def run_experiment(
     """Unified experiment runner supporting multiple algorithms.
     
     Args:
-        algorithm: Algorithm to use ('imp', 'earlybird', 'earlybird_resnet')
+        algorithm: Algorithm to use ('imp', 'earlybird', 'earlybird_resnet',
+            'grasp', 'synflow', 'genetic', 'hybrid', 'hybrid_improve',
+            'recompute_metrics')
         model: Model architecture ('resnet20', 'vgg16', etc.)
         dataset: Dataset name ('cifar10', 'mnist', etc.)
         seed: Random seed for reproducibility
@@ -3112,6 +3238,21 @@ def run_experiment(
     print(f"Device: {device}")
     print(f"{'='*80}\n")
     
+    if algorithm.lower() == "recompute_metrics":
+        result_dir = kwargs.get("result_dir")
+        if not result_dir:
+            raise ValueError(
+                "`result_dir` is required for algorithm='recompute_metrics'. "
+                "Pass the existing run folder containing results.json/final_model.pt/final_masks.pt."
+            )
+        return recompute_efficiency_metrics_for_existing_run(
+            result_dir=result_dir,
+            device=device,
+            override_model_name=kwargs.get("override_model_name"),
+            override_dataset_name=kwargs.get("override_dataset_name"),
+            override_num_classes=kwargs.get("override_num_classes"),
+        )
+
     if algorithm.lower() == "imp":
         # IMP-specific parameters
         target_sparsity = kwargs.get('target_sparsity', 0.9)
@@ -3663,7 +3804,7 @@ def run_experiment(
 
     else:
         raise ValueError(f"Unknown algorithm: {algorithm}. "
-                         f"Choose from: imp, earlybird, earlybird_resnet, grasp, synflow, genetic, hybrid")
+                         f"Choose from: imp, earlybird, earlybird_resnet, grasp, synflow, genetic, hybrid, hybrid_improve, recompute_metrics")
 
 
 if __name__ == "__main__":
@@ -3718,6 +3859,10 @@ Examples:
   python -m src.experiments --algorithm hybrid --model resnet20 --dataset cifar100 --seed 42 \\
       --target_sparsity 0.7 --oneshot_ratio 0.7 --iterative_step 0.10
 
+  # Recompute missing canonical efficiency metrics for an existing output folder
+  python -m src.experiments --algorithm recompute_metrics \\
+      --result_dir ./results/imp/imp_resnet20_cifar10_s0.9_seed42/20260331_120000
+
   # Quick test modes
   python -m src.experiments --mode quick_imp
   python -m src.experiments --mode quick_earlybird
@@ -3728,7 +3873,7 @@ Examples:
     
     # Main arguments
     parser.add_argument("--algorithm", type=str, default="imp",
-                       choices=["imp", "earlybird", "earlybird_resnet", "grasp", "synflow", "genetic", "hybrid", "hybrid_improve"],
+                       choices=["imp", "earlybird", "earlybird_resnet", "grasp", "synflow", "genetic", "hybrid", "hybrid_improve", "recompute_metrics"],
                        help="Pruning algorithm to use")
     parser.add_argument("--model", type=str, default="resnet20",
                        help="Model architecture (resnet20, vgg16, etc.)")
@@ -3825,6 +3970,17 @@ Examples:
     ckpt_group.add_argument("--checkpoint_interval", type=int, default=10,
                            help="Save a checkpoint every N epochs / stages "
                                 "depending on the algorithm (default: 10)")
+
+    # Post-hoc metrics recomputation arguments
+    metrics_group = parser.add_argument_group('Metrics recomputation arguments')
+    metrics_group.add_argument("--result_dir", type=str, default=None,
+                              help="Existing run directory with results.json/final_model.pt/final_masks.pt")
+    metrics_group.add_argument("--override_model_name", type=str, default=None,
+                              help="Override model name when results.json config is incomplete")
+    metrics_group.add_argument("--override_dataset_name", type=str, default=None,
+                              help="Override dataset name when results.json config is incomplete")
+    metrics_group.add_argument("--override_num_classes", type=int, default=None,
+                              help="Override number of classes when it cannot be inferred")
 
     # SynFlow-specific arguments
     synflow_group = parser.add_argument_group('SynFlow arguments')
@@ -3985,6 +4141,12 @@ Examples:
             kwargs['time_limit_seconds'] = args.time_limit
             kwargs['checkpoint_interval'] = args.checkpoint_interval
 
+        elif args.algorithm == "recompute_metrics":
+            kwargs['result_dir'] = args.result_dir
+            kwargs['override_model_name'] = args.override_model_name
+            kwargs['override_dataset_name'] = args.override_dataset_name
+            kwargs['override_num_classes'] = args.override_num_classes
+
         # Common arguments
         kwargs['learning_rate'] = args.learning_rate
         kwargs['momentum'] = args.momentum
@@ -4037,4 +4199,10 @@ Examples:
             print(f"Best Phase Test Accuracy: {fr.get('best_phase_test_accuracy', 0):.2f}%")
             print(f"Final Test Accuracy: {fr.get('final_test_accuracy', 0):.2f}%")
             print(f"Total Time: {fr.get('total_time_seconds', 0):.2f}s")
+        elif args.algorithm == "recompute_metrics":
+            fr = results.get('final_results', {})
+            print(f"Updated run: {results.get('run_dir', '')}")
+            print(f"Dense FLOPs: {fr.get('dense_flops', None)}")
+            print(f"Pruned FLOPs: {fr.get('pruned_flops', None)}")
+            print(f"FLOPs reduction: {fr.get('flops_reduction', None)}")
         print(f"{'='*80}\n")

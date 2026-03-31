@@ -12,6 +12,7 @@
                 \item Độ chính xác: $a' \ge a$ - độ chính xác của mạng con không thua kém mạng lớn gốc.
                 \item Tốc độ hội tụ: $j' \le j$ - số vòng lặp để hàm mất mát đạt cực tiểu không lớn hơn mạng gốc.
             \end{itemize}
+
             Ngoài ra, thuật toán này còn áp dụng cơ chế đặt lại (resetting) và late resetting. Sau mỗi vòng cắt tỉa, các trọng số còn sót lại phải được đặt lại (reset) về giá trị khởi tạo ban đầu $\theta_0$ thay vì tiếp tục huấn luyện từ giá trị đã tối ưu. Bước này đã được chứng minh thực nghiệm trong bài báo \gls{lth} gốc \cite[p~.2]{imp}, và được chứng minh một cách rõ ràng hơn trong \cite{deconstructlth}. \\
             Nghiên cứu này đã giải mã cơ chế đặt lại và phát hiện ra rằng yếu tố then chốt quyết định hiệu suất của một "vé trúng thưởng" không nằm ở giá trị độ lớn cụ thể, mà nằm ở dấu (sign) của trọng số tại thời điểm khởi tạo. Việc đặt lại trọng số về $\theta_0$ đảm bảo các kết nối neuron bắt đầu trong cùng một "góc phần tư dấu" mà chúng đã chiếm giữ tại thời điểm khởi tạo, nơi mà bộ tối ưu hóa (optimizer) có thể dễ dàng điều hướng. Thực nghiệm cho thấy nếu giữ nguyên dấu ban đầu nhưng thay thế giá trị trọng số bằng một hằng số $\pm \alpha$, mạng con vẫn có thể đạt được độ chính xác cao tương đương với việc đặt lại về giá trị $\theta_0$ chính xác. Điều này gợi ý rằng các bộ tối ưu hóa gặp khó khăn khi phải vượt qua "rào cản số không" để đổi dấu trọng số trong quá trình huấn luyện mạng thưa. \\
             Mặc dù đặt lại về thời điểm $k=0$ hoạt động tốt trên các tập dữ liệu nhỏ như MNIST, cơ chế này thường thất bại khi áp dụng cho các kiến trúc sâu và phức tạp hơn như ResNet-50 hoặc VGG-19 trên ImageNet. Frankle và cộng sự (2019) đã đề xuất kỹ thuật Late Resetting (hoặc Weight Rewinding), trong đó trọng số không được đặt lại về 0 mà về giá trị tại một thời điểm $k$ rất sớm trong quá trình huấn luyện (thường là khoảng 0.1\% đến 7\% tổng thời gian) \cite{imp}. Cơ sở lý thuyết cho hiện tượng này là tính ổn định (stability) \cite{deconstructlth} đối với nhiễu của thuật toán hạ gradient ngẫu nhiên (SGD). Một mạng con được coi là ổn định nếu các phiên bản huấn luyện khác nhau của nó (với các hạt giống ngẫu nhiên khác nhau) đều hội tụ về cùng một lòng chảo (basin) tối ưu \cite{imp}. Việc quay ngược về thời điểm $k > 0$ giúp mạng con vượt qua giai đoạn biến động mạnh lúc ban đầu và đạt được sự kết nối neuron tuyến tính (linear mode connectivity), từ đó đảm bảo hiệu suất không bị suy giảm khi độ thưa tăng cao \cite[sec.~4]{lee2024revisiting}.
@@ -48,14 +49,16 @@
         xuất phát từ quan sát rằng các "vé số may mắn" không nhất thiết
         phải chờ đến khi mô hình được huấn luyện hoàn toàn mới xuất hiện.
         Thay vào đó, cấu trúc kết nối quan trọng của mạng đã hình thành ổn định từ rất sớm trong quá trình
-        huấn luyện, thường chỉ sau $6\%$--$20\%$ tổng số epoch.
-        Dựa trên nhận xét này, EB Tickets đề xuất một chiến lược huấn luyện hiệu quả gồm hai giai đoạn
-        \emph{(i)} xác định sớm mạng con quan trọng bằng các phương án huấn luyện chi phí thấp
-        (learning rate lớn, huấn luyện độ chính xác thấp, kết hợp dừng sớm), và
-        \emph{(ii)} tiếp tục huấn luyện chỉ mạng con đó đến độ chính xác mục tiêu.
-        Kết quả thực nghiệm cho thấy EB Train có thể tiết kiệm tới $5{,}8\times$--$10{,}7\times$ năng lượng
-        huấn luyện trong khi vẫn duy trì độ chính xác tương đương hoặc cao hơn so với huấn luyện toàn mô hình
-        trên các kiến trúc VGG16, PreResNet101, ResNet18/50 và các bộ dữ liệu CIFAR-10/100, ImageNet.
+        huấn luyện, thường chỉ sau $6\%$ - $20\%$ tổng số epoch.
+        Dựa trên nhận xét này, EB Tickets đề xuất một chiến lược huấn luyện hiệu quả gồm hai giai đoạn:
+        \begin{enumerate}
+            \item  Xác định sớm mạng con quan trọng bằng các phương án huấn luyện chi phí thấp
+                    (learning rate lớn, huấn luyện độ chính xác thấp, kết hợp dừng sớm), và
+            \item Tiếp tục huấn luyện chỉ mạng con đó đến độ chính xác mục tiêu.
+                    Kết quả thực nghiệm cho thấy EB Train có thể tiết kiệm tới $5{,}8\times$--$10{,}7\times$ năng lượng
+                    huấn luyện trong khi vẫn duy trì độ chính xác tương đương hoặc cao hơn so với huấn luyện toàn mô hình
+                    trên các kiến trúc VGG16, PreResNet101, ResNet18/50 và các bộ dữ liệu CIFAR-10/100, ImageNet \cite{earlybird}.
+        \end{enumerate}
 
         Cho mạng nơ-ron dày đặc $f(\mathbf{x},\,\symbfit{\theta})$ được khởi tạo ngẫu nhiên, trong đó
         $\symbfit{\theta} \in \mathbb{R}^{d}$ là tập tham số (trọng số).

@@ -253,7 +253,26 @@ python -m src.experiments --algorithm hybrid_improve \
 - `--time_limit`: Wall-clock time limit in seconds to gracefully exit and save.
 - `--resume_from`: Path to a checkpoint file to resume the experiment.
 
-### 8. Common Arguments
+### 8. Recompute Missing Canonical Metrics (Post-hoc)
+
+If a previous run folder contains `results.json`, `final_model.pt`, and `final_masks.pt` but misses canonical efficiency metrics (`flops_reduction`, `dense_flops`, `pruned_flops`, latency/throughput fields), you can backfill them without rerunning training:
+
+```bash
+python -m src.experiments --algorithm recompute_metrics \
+    --result_dir ./results/imp/imp_resnet20_cifar10_s0.9_seed42/20260331_120000 \
+    --device cpu
+```
+
+**Available recompute arguments:**
+- `--result_dir`: Existing run output folder (must contain `results.json`, `final_model.pt`, `final_masks.pt`)
+- `--override_model_name`: Optional override if `results.json` config is missing `model_name`
+- `--override_dataset_name`: Optional override if `results.json` config is missing `dataset_name`
+- `--override_num_classes`: Optional override if class count cannot be inferred
+
+The command updates `results.json` in place and creates a timestamped backup:
+- `results_before_metrics_recompute_YYYYMMDD_HHMMSS.json`
+
+### 9. Common Arguments
 
 All algorithms support:
 - `--model`: Architecture (resnet20, resnet50, vgg16, vgg19)
@@ -265,7 +284,7 @@ All algorithms support:
 - `--momentum`: SGD momentum (default: 0.9)
 - `--weight_decay`: Weight decay
 
-### 9. Quick Tests
+### 10. Quick Tests
 
 Run quick tests with reduced iterations (for validation):
 ```bash
