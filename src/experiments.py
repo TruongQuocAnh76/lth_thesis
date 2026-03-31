@@ -140,6 +140,7 @@ class IMPExperiment:
     def _get_config_dict(self) -> Dict:
         """Return experiment configuration as dictionary."""
         return {
+            'algorithm': 'imp',
             'model_name': self.model_name,
             'dataset_name': self.dataset_name,
             'num_classes': self.num_classes,
@@ -265,6 +266,10 @@ class IMPExperiment:
                 'remaining_weights_fraction': 1 - current_sparsity,
                 'test_accuracy': test_acc,
                 'test_loss': test_loss,
+                'train_losses': history['train_losses'],
+                'train_accs': history['train_accs'],
+                'test_losses': history['test_losses'],
+                'test_accs': history['test_accs'],
                 'train_accuracy_final': history['train_accs'][-1] if history['train_accs'] else 0,
                 'train_loss_final': history['train_losses'][-1] if history['train_losses'] else 0,
                 'best_test_accuracy': max(history['test_accs']) if history['test_accs'] else test_acc,
@@ -313,9 +318,28 @@ class IMPExperiment:
         overall_end_time = time.time()
         total_training_seconds = overall_end_time - overall_start_time
 
+        self.results['train_history'] = {
+            'iterations': [
+                {
+                    'iteration': item['iteration'],
+                    'sparsity': item['sparsity'],
+                    'train_losses': item['train_losses'],
+                    'train_accs': item['train_accs'],
+                    'test_losses': item['test_losses'],
+                    'test_accs': item['test_accs'],
+                }
+                for item in self.results['iterations']
+            ]
+        }
+
         self.results['final_results'] = {
             'final_sparsity': final_sparsity,
+            'overall_sparsity': final_sparsity,
             'final_test_accuracy': final_test_accuracy,
+            'final_train_accuracy': (
+                self.results['iterations'][-1]['train_accuracy_final']
+                if self.results['iterations'] else None
+            ),
             'initial_test_accuracy': initial_test_accuracy,
             'accuracy_at_target_sparsity': accuracy_at_target_sparsity,
             'training_computational_cost_seconds': total_training_seconds,
@@ -389,22 +413,45 @@ class IMPExperiment:
         
         with open(path, 'w', newline='') as f:
             writer = csv.writer(f)
-            # Header
             writer.writerow([
-                'iteration', 'sparsity', 'remaining_weights', 
-                'test_accuracy', 'test_loss', 'train_accuracy', 'train_loss'
+                'iteration', 'epoch', 'sparsity', 'remaining_weights',
+                'train_loss', 'train_acc', 'test_loss', 'test_acc'
             ])
-            # Data rows
+
             for result in self.results['iterations']:
-                writer.writerow([
-                    result['iteration'],
-                    f"{result['sparsity']:.4f}",
-                    f"{result['remaining_weights_fraction']:.4f}",
-                    f"{result['test_accuracy']:.2f}",
-                    f"{result['test_loss']:.4f}",
-                    f"{result['train_accuracy_final']:.2f}",
-                    f"{result['train_loss_final']:.4f}"
-                ])
+                max_epochs = max(
+                    len(result.get('train_losses', [])),
+                    len(result.get('train_accs', [])),
+                    len(result.get('test_losses', [])),
+                    len(result.get('test_accs', [])),
+                )
+                for epoch_idx in range(max_epochs):
+                    writer.writerow([
+                        result['iteration'],
+                        epoch_idx + 1,
+                        f"{result['sparsity']:.4f}",
+                        f"{result['remaining_weights_fraction']:.4f}",
+                        (
+                            f"{result['train_losses'][epoch_idx]:.4f}"
+                            if epoch_idx < len(result.get('train_losses', []))
+                            else ''
+                        ),
+                        (
+                            f"{result['train_accs'][epoch_idx]:.2f}"
+                            if epoch_idx < len(result.get('train_accs', []))
+                            else ''
+                        ),
+                        (
+                            f"{result['test_losses'][epoch_idx]:.4f}"
+                            if epoch_idx < len(result.get('test_losses', []))
+                            else ''
+                        ),
+                        (
+                            f"{result['test_accs'][epoch_idx]:.2f}"
+                            if epoch_idx < len(result.get('test_accs', []))
+                            else ''
+                        ),
+                    ])
 
 
 def run_imp_experiment(
@@ -539,6 +586,7 @@ class EarlyBirdExperiment:
     def _get_config_dict(self) -> Dict:
         """Return experiment configuration as dictionary."""
         return {
+            'algorithm': 'earlybird',
             'model_name': self.model_name,
             'dataset_name': self.dataset_name,
             'num_classes': self.num_classes,
@@ -891,9 +939,19 @@ class EarlyBirdExperiment:
         overall_end_time = time.time()
         total_training_seconds = overall_end_time - overall_start_time
 
+        self.results['train_history'] = {
+            'search_phase': copy.deepcopy(self.results['search_phase']),
+            'finetune_phase': copy.deepcopy(self.results['finetune_phase']),
+        }
+
         self.results['final_results'] = {
             'channel_sparsity': channel_sparsity,
+            'overall_sparsity': channel_sparsity,
             'final_test_accuracy': final_test_acc,
+            'final_train_accuracy': (
+                finetune_results['train_accs'][-1]
+                if finetune_results['train_accs'] else None
+            ),
             'search_test_accuracy': search_results['test_accs'][-1],
             'converged': search_results['converged'],
             'convergence_epoch': search_results['convergence_epoch'],
@@ -978,17 +1036,73 @@ class EarlyBirdExperiment:
         
         with open(path, 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['Phase', 'Metric', 'Value'])
-            
-            # Search phase
-            writer.writerow(['Search', 'Converged', self.results['search_phase']['converged']])
-            writer.writerow(['Search', 'Convergence Epoch', self.results['search_phase']['convergence_epoch']])
-            writer.writerow(['Search', 'Final Test Acc', f"{self.results['search_phase']['final_test_acc']:.2f}"])
-            writer.writerow(['Search', 'Channel Sparsity', f"{self.results['search_phase']['channel_sparsity']:.4f}"])
-            
-            # Finetune phase
-            writer.writerow(['Finetune', 'Final Test Acc', f"{self.results['finetune_phase']['final_test_acc']:.2f}"])
-            writer.writerow(['Finetune', 'Final Test Loss', f"{self.results['finetune_phase']['final_test_loss']:.4f}"])
+            writer.writerow(['phase', 'epoch', 'train_loss', 'train_acc', 'test_loss', 'test_acc'])
+
+            search = self.results.get('search_phase', {})
+            search_epochs = max(
+                len(search.get('train_losses', [])),
+                len(search.get('train_accs', [])),
+                len(search.get('test_losses', [])),
+                len(search.get('test_accs', [])),
+            )
+            for epoch_idx in range(search_epochs):
+                writer.writerow([
+                    'search',
+                    epoch_idx + 1,
+                    (
+                        f"{search['train_losses'][epoch_idx]:.4f}"
+                        if epoch_idx < len(search.get('train_losses', []))
+                        else ''
+                    ),
+                    (
+                        f"{search['train_accs'][epoch_idx]:.2f}"
+                        if epoch_idx < len(search.get('train_accs', []))
+                        else ''
+                    ),
+                    (
+                        f"{search['test_losses'][epoch_idx]:.4f}"
+                        if epoch_idx < len(search.get('test_losses', []))
+                        else ''
+                    ),
+                    (
+                        f"{search['test_accs'][epoch_idx]:.2f}"
+                        if epoch_idx < len(search.get('test_accs', []))
+                        else ''
+                    ),
+                ])
+
+            finetune = self.results.get('finetune_phase', {})
+            finetune_epochs = max(
+                len(finetune.get('train_losses', [])),
+                len(finetune.get('train_accs', [])),
+                len(finetune.get('test_losses', [])),
+                len(finetune.get('test_accs', [])),
+            )
+            for epoch_idx in range(finetune_epochs):
+                writer.writerow([
+                    'finetune',
+                    epoch_idx + 1,
+                    (
+                        f"{finetune['train_losses'][epoch_idx]:.4f}"
+                        if epoch_idx < len(finetune.get('train_losses', []))
+                        else ''
+                    ),
+                    (
+                        f"{finetune['train_accs'][epoch_idx]:.2f}"
+                        if epoch_idx < len(finetune.get('train_accs', []))
+                        else ''
+                    ),
+                    (
+                        f"{finetune['test_losses'][epoch_idx]:.4f}"
+                        if epoch_idx < len(finetune.get('test_losses', []))
+                        else ''
+                    ),
+                    (
+                        f"{finetune['test_accs'][epoch_idx]:.2f}"
+                        if epoch_idx < len(finetune.get('test_accs', []))
+                        else ''
+                    ),
+                ])
 
 
 def run_earlybird_experiment(
@@ -1274,6 +1388,7 @@ class GraSPExperiment:
             'test_losses': history['test_losses'],
             'test_accs': history['test_accs'],
         }
+        self.results['train_history'] = copy.deepcopy(self.results['training'])
         efficiency_metrics = compute_efficiency_metrics(
             model_name=self.model_name,
             num_classes=self.num_classes,
@@ -1290,6 +1405,7 @@ class GraSPExperiment:
         self.results['final_results'] = {
             'best_test_accuracy': best_test,
             'final_test_accuracy': final_test,
+            'final_train_accuracy': history['train_accs'][-1] if history['train_accs'] else None,
             'overall_sparsity': layer_sp['overall'],
             'training_computational_cost_seconds': total_training_seconds,
             **efficiency_metrics,
@@ -1900,6 +2016,7 @@ class GAExperiment:
             'training_time_seconds': train_time,
             'stopped_early': stopped_training,
         }
+        self.results['train_history'] = copy.deepcopy(self.results['training'])
         efficiency_metrics = compute_efficiency_metrics(
             model_name=self.model_name,
             num_classes=self.num_classes,
@@ -1912,12 +2029,14 @@ class GAExperiment:
         self.results['final_results'] = {
             'best_test_accuracy': best_test,
             'final_test_accuracy': final_test,
+            'final_train_accuracy': history['train_accs'][-1] if history['train_accs'] else None,
             'overall_sparsity': overall_sparsity,
             'ga_time_seconds': ga_time,
             'training_time_seconds': train_time,
             'total_time_seconds': total_time,
             'total_generations': ga_stats['total_generations'],
             'completed': not stopped_training,
+            'training_computational_cost_seconds': train_time,
             **efficiency_metrics,
         }
 
@@ -2289,6 +2408,7 @@ class SynFlowExperiment:
             'test_accs': history['test_accs'],
             'training_time_seconds': train_time,
         }
+        self.results['train_history'] = copy.deepcopy(self.results['training'])
         efficiency_metrics = compute_efficiency_metrics(
             model_name=self.model_name,
             num_classes=self.num_classes,
@@ -2302,11 +2422,13 @@ class SynFlowExperiment:
         self.results['final_results'] = {
             'best_test_accuracy': best_test,
             'final_test_accuracy': final_test,
+            'final_train_accuracy': history['train_accs'][-1] if history['train_accs'] else None,
             'rho': self.rho,
             'overall_sparsity': layer_sp['overall'],
             'pruning_time_seconds': prune_time,
             'training_time_seconds': train_time,
             'total_time_seconds': total_time,
+            'training_computational_cost_seconds': train_time,
             **efficiency_metrics,
         }
 
@@ -2557,6 +2679,58 @@ def _convert_to_serializable(obj):
         return obj
 
 
+def _ensure_efficiency_metric_keys(final_results: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure canonical efficiency metric keys are always present."""
+    metric_keys = [
+        "flops_reduction",
+        "dense_flops",
+        "pruned_flops",
+        "dense_latency_ms",
+        "pruned_latency_ms",
+        "dense_throughput",
+        "pruned_throughput",
+        "training_computational_cost_seconds",
+    ]
+    for key in metric_keys:
+        final_results.setdefault(key, None)
+    return final_results
+
+
+def _save_multiphase_summary_csv(path: Path, phases: List[Tuple[str, Dict[str, Any]]]) -> None:
+    """Save epoch-by-epoch metrics for one or more training phases."""
+    import csv
+
+    with open(path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['phase', 'epoch', 'train_loss', 'train_acc', 'test_loss', 'test_acc'])
+
+        for phase_name, history in phases:
+            if not isinstance(history, dict):
+                continue
+
+            train_losses = history.get('train_losses', history.get('train_loss', []))
+            train_accs = history.get('train_accs', history.get('train_acc', []))
+            test_losses = history.get('test_losses', history.get('test_loss', []))
+            test_accs = history.get('test_accs', history.get('test_acc', []))
+
+            max_epochs = max(
+                len(train_losses),
+                len(train_accs),
+                len(test_losses),
+                len(test_accs),
+            )
+
+            for epoch_idx in range(max_epochs):
+                writer.writerow([
+                    phase_name,
+                    epoch_idx + 1,
+                    f"{train_losses[epoch_idx]:.4f}" if epoch_idx < len(train_losses) else '',
+                    f"{train_accs[epoch_idx]:.2f}" if epoch_idx < len(train_accs) else '',
+                    f"{test_losses[epoch_idx]:.4f}" if epoch_idx < len(test_losses) else '',
+                    f"{test_accs[epoch_idx]:.2f}" if epoch_idx < len(test_accs) else '',
+                ])
+
+
 def _save_earlybird_search_csv(path: Path, history: Dict):
     """Save Early-Bird search phase history as CSV."""
     import csv
@@ -2787,6 +2961,21 @@ def run_experiment(
         experiment_name = f"earlybird_resnet_{model}_{dataset}_s{target_sparsity:.2f}_seed{seed}"
         result_dir = save_dir / "earlybird_resnet" / experiment_name / timestamp
         result_dir.mkdir(parents=True, exist_ok=True)
+
+        raw_sparsity = results.get('actual_sparsity', None)
+        normalized_sparsity = None
+        if raw_sparsity is not None:
+            normalized_sparsity = raw_sparsity / 100.0 if raw_sparsity > 1 else raw_sparsity
+
+        finetune_history = results.get('finetune_history', {})
+        final_test_accuracy = (
+            finetune_history.get('test_acc', [])[-1]
+            if finetune_history.get('test_acc') else results.get('best_test_acc', None)
+        )
+        final_train_accuracy = (
+            finetune_history.get('train_acc', [])[-1]
+            if finetune_history.get('train_acc') else None
+        )
         
         # Prepare results for saving (exclude model and tensors)
         save_results = {
@@ -2808,22 +2997,39 @@ def run_experiment(
                 'patience': patience,
                 'pruning_method': pruning_method,
             },
+            'train_history': {
+                'search_phase': _convert_to_serializable(results.get('history', {})),
+                'finetune_phase': _convert_to_serializable(results.get('finetune_history', {})),
+            },
             'final_results': {
                 'converged': results.get('converged', False),
                 'convergence_epoch': results.get('convergence_epoch', None),
                 'best_test_accuracy': results.get('best_test_acc', None),
+                'final_test_accuracy': final_test_accuracy,
+                'final_train_accuracy': final_train_accuracy,
                 'test_accuracy_at_convergence': results.get('test_acc_pruned', None),
-                'final_sparsity': results.get('actual_sparsity', None),
+                'final_sparsity': normalized_sparsity,
+                'overall_sparsity': normalized_sparsity,
             },
             'search_history': _convert_to_serializable(results.get('history', {})),
             'finetune_history': _convert_to_serializable(results.get('finetune_history', {})),
             'eb_stats': _convert_to_serializable(results.get('eb_stats', {})),
         }
+        save_results['final_results'] = _ensure_efficiency_metric_keys(save_results['final_results'])
         
         # Save JSON results
         results_path = result_dir / "results.json"
         with open(results_path, 'w') as f:
             json.dump(save_results, f, indent=2)
+
+        # Save combined canonical summary CSV
+        _save_multiphase_summary_csv(
+            result_dir / "summary.csv",
+            [
+                ('search', results.get('history', {})),
+                ('finetune', results.get('finetune_history', {})),
+            ],
+        )
         
         # Save summary CSV (search phase)
         if results.get('history'):
@@ -2834,8 +3040,19 @@ def run_experiment(
         if results.get('finetune_history'):
             summary_path = result_dir / "finetune_summary.csv"
             _save_earlybird_finetune_csv(summary_path, results['finetune_history'])
+
+        if results.get('model') is not None:
+            torch.save(results['model'].state_dict(), result_dir / "final_model.pt")
+        if results.get('weight_masks') is not None:
+            masks_torch = {
+                k: torch.from_numpy(v) if isinstance(v, np.ndarray) else v
+                for k, v in results['weight_masks'].items()
+            }
+            torch.save(masks_torch, result_dir / "final_masks.pt")
         
         print(f"\nResults saved to: {result_dir}")
+        results['train_history'] = save_results['train_history']
+        results['final_results'] = save_results['final_results']
         return results
     
     elif algorithm.lower() == "grasp":
@@ -3032,61 +3249,65 @@ def run_experiment(
         results_serializable = dict(hybrid_results)
         model_obj = results_serializable.pop("model", None)
         masks_obj = results_serializable.pop("masks", None)
+        initial_model_state_dict = results_serializable.pop("initial_model_state_dict", None)
+
+        results_serializable["train_history"] = {
+            "initial_training": _convert_to_serializable(
+                results_serializable.get("initial_training", {})
+            ),
+            "phases": _convert_to_serializable(results_serializable.get("phases", [])),
+        }
+
+        final_results = dict(results_serializable.get("final_results", {}))
+        final_results["overall_sparsity"] = final_results.get(
+            "overall_sparsity",
+            final_results.get("final_sparsity"),
+        )
+
+        final_train_accuracy = None
+        phases = results_serializable.get("phases", [])
+        if phases:
+            last_phase = phases[-1]
+            train_accs = last_phase.get("train_accs", [])
+            if train_accs:
+                final_train_accuracy = train_accs[-1]
+        elif results_serializable.get("initial_training", {}).get("train_accs"):
+            final_train_accuracy = results_serializable["initial_training"]["train_accs"][-1]
+
+        final_results["final_train_accuracy"] = final_results.get(
+            "final_train_accuracy",
+            final_train_accuracy,
+        )
+        final_results["training_computational_cost_seconds"] = final_results.get(
+            "training_computational_cost_seconds",
+            final_results.get("total_time_seconds"),
+        )
 
         # Ensure final_results is present and contains all metrics
         # Always ensure all new metrics are present in final_results, but do not overwrite existing values
-        required_metrics = [
-            "flops_reduction", "dense_flops", "pruned_flops",
-            "dense_latency_ms", "pruned_latency_ms",
-            "dense_throughput", "pruned_throughput"
-        ]
-        if "final_results" not in results_serializable or not isinstance(results_serializable["final_results"], dict):
-            results_serializable["final_results"] = {}
-        for metric in required_metrics:
-            if metric not in results_serializable["final_results"]:
-                # Try to get from hybrid_results["final_results"] if available
-                value = None
-                if hasattr(hybrid_results, "get"):
-                    fr = hybrid_results.get("final_results", {})
-                    value = fr.get(metric, None)
-                results_serializable["final_results"][metric] = value
+        results_serializable["final_results"] = _ensure_efficiency_metric_keys(final_results)
 
         # Save JSON
         results_path = result_dir / "results.json"
         with open(results_path, 'w') as f:
             json.dump(results_serializable, f, indent=2)
 
-        # Save summary CSV (per-phase)
-        summary_path = result_dir / "summary.csv"
-        with open(summary_path, 'w', newline='') as f:
-            writer = csv.writer(f)
-            # Header
-            writer.writerow([
-                'step', 'label', 'prune_ratio', 'sparsity_after_prune',
-                'finetune_epochs_run', 'finetune_max_epochs', 'finetune_patience',
-                'best_test_acc', 'final_test_acc'
-            ])
-            for i, phase in enumerate(hybrid_results.get('phases', [])):
-                writer.writerow([
-                    i,
-                    phase.get('label', ''),
-                    f"{phase.get('prune_ratio', 0):.4f}",
-                    f"{phase.get('sparsity_after_prune', 0):.4f}",
-                    phase.get('finetune_epochs_run', ''),
-                    phase.get('finetune_max_epochs', ''),
-                    phase.get('finetune_patience', ''),
-                    f"{phase.get('best_test_acc', 0):.2f}",
-                    f"{phase.get('final_test_acc', 0):.2f}"
-                ])
+        # Save summary CSV (epoch-by-epoch canonical view)
+        _save_multiphase_summary_csv(
+            result_dir / "summary.csv",
+            [('initial_training', hybrid_results.get('initial_training', {}))]
+            + [
+                (phase.get('label', f'phase_{i}'), phase)
+                for i, phase in enumerate(hybrid_results.get('phases', []))
+            ],
+        )
 
         # Save model and masks in the same format as IMP
         import torch
-        # Save initial_model.pt if available in config
-        if 'config' in hybrid_results and hasattr(model_obj, 'state_dict'):
-            # Try to reconstruct initial weights if possible (not always available)
-            # For now, save the current model as both initial and final
+        # Save initial_model.pt when the underlying run exposes it
+        if initial_model_state_dict is not None:
             initial_model_path = result_dir / "initial_model.pt"
-            torch.save(model_obj.state_dict(), initial_model_path)
+            torch.save(initial_model_state_dict, initial_model_path)
 
         # Save final_model.pt
         if model_obj is not None and hasattr(model_obj, 'state_dict'):
@@ -3101,6 +3322,9 @@ def run_experiment(
             torch.save(masks_torch, masks_path)
 
         print(f"\nHybrid results saved to: {result_dir}")
+
+        hybrid_results["train_history"] = results_serializable["train_history"]
+        hybrid_results["final_results"] = results_serializable["final_results"]
         return hybrid_results
 
     elif algorithm.lower() == "hybrid_improve":

@@ -1004,6 +1004,7 @@ def hybrid_pruning(
     # Initial masks (all ones)
     initial_weights = get_prunable_layers(raw_model)
     masks = create_initial_masks(initial_weights)
+    initial_model_state_dict = copy.deepcopy(raw_model.state_dict())
 
     # ------------------------------------------------------------------ #
     # Resume from checkpoint (if provided)
@@ -1405,10 +1406,21 @@ def hybrid_pruning(
 
     results["final_results"] = {
         "final_sparsity": final_sparsity,
+        "overall_sparsity": final_sparsity,
         "final_test_accuracy": final_test_acc,
+        "final_train_accuracy": (
+            results["phases"][-1]["train_accs"][-1]
+            if results["phases"] and results["phases"][-1].get("train_accs")
+            else (
+                results.get("initial_training", {}).get("train_accs", [])[-1]
+                if results.get("initial_training", {}).get("train_accs")
+                else None
+            )
+        ),
         "best_phase_test_accuracy": best_phase_acc,
         "initial_test_accuracy": init_test_acc,
         "total_time_seconds": total_time,
+        "training_computational_cost_seconds": total_time,
         "stopped_early": stopped_early,
         **efficiency_metrics,
     }
@@ -1428,8 +1440,13 @@ def hybrid_pruning(
     print(f"{'='*60}")
 
     # Attach model & masks for downstream usage
+    results["train_history"] = {
+        "initial_training": copy.deepcopy(results.get("initial_training", {})),
+        "phases": copy.deepcopy(results.get("phases", [])),
+    }
     results["model"] = model
     results["masks"] = masks
+    results["initial_model_state_dict"] = initial_model_state_dict
 
     # Save to IMP-style directory format
     def make_serializable(obj):
@@ -1450,36 +1467,39 @@ def hybrid_pruning(
             return obj
 
     def save_summary_csv(path, results_dict):
-        """Save iteration results as CSV."""
+        """Save epoch-by-epoch metrics in the canonical summary format."""
         with open(path, 'w', newline='') as f:
             writer = csv.writer(f)
-            # Header
-            writer.writerow([
-                'step', 'label', 'prune_ratio', 'sparsity_after_prune',
-                'finetune_epochs_run', 'best_test_acc', 'final_test_acc'
-            ])
-            
-            # Initial training row
+            writer.writerow(['phase', 'epoch', 'train_loss', 'train_acc', 'test_loss', 'test_acc'])
+
+            phase_items = []
             if 'initial_training' in results_dict:
-                init_res = results_dict['initial_training']
-                writer.writerow([
-                    -1, 'initial_training', 0.0, 0.0,
-                    len(init_res.get('train_losses', [])),
-                    f"{init_res.get('best_test_acc', init_res.get('final_test_acc', 0.0)):.2f}",
-                    f"{init_res.get('final_test_acc', 0.0):.2f}"
-                ])
-                
-            # Data rows from phases
-            for phase in results_dict.get('phases', []):
-                writer.writerow([
-                    phase.get('step', ''),
-                    phase.get('label', ''),
-                    f"{phase.get('prune_ratio', 0):.4f}",
-                    f"{phase.get('sparsity_after_prune', 0):.4f}",
-                    phase.get('finetune_epochs_run', ''),
-                    f"{phase.get('best_test_acc', 0):.2f}",
-                    f"{phase.get('final_test_acc', 0):.2f}"
-                ])
+                phase_items.append(('initial_training', results_dict['initial_training']))
+            phase_items.extend(
+                (phase.get('label', f"phase_{idx}"), phase)
+                for idx, phase in enumerate(results_dict.get('phases', []))
+            )
+
+            for phase_name, phase in phase_items:
+                train_losses = phase.get('train_losses', [])
+                train_accs = phase.get('train_accs', [])
+                test_losses = phase.get('test_losses', [])
+                test_accs = phase.get('test_accs', [])
+                max_epochs = max(
+                    len(train_losses),
+                    len(train_accs),
+                    len(test_losses),
+                    len(test_accs),
+                )
+                for epoch_idx in range(max_epochs):
+                    writer.writerow([
+                        phase_name,
+                        epoch_idx + 1,
+                        f"{train_losses[epoch_idx]:.4f}" if epoch_idx < len(train_losses) else '',
+                        f"{train_accs[epoch_idx]:.2f}" if epoch_idx < len(train_accs) else '',
+                        f"{test_losses[epoch_idx]:.4f}" if epoch_idx < len(test_losses) else '',
+                        f"{test_accs[epoch_idx]:.2f}" if epoch_idx < len(test_accs) else '',
+                    ])
 
     # Construct the save directory
     base_results_dir = Path(checkpoint_dir).parent.parent if checkpoint_dir else Path("./results")
@@ -1489,7 +1509,10 @@ def hybrid_pruning(
     result_dir.mkdir(parents=True, exist_ok=True)
 
     # Save JSON results
-    results_to_serialize = {k: v for k, v in results.items() if k not in ["model", "masks"]}
+    results_to_serialize = {
+        k: v for k, v in results.items()
+        if k not in ["model", "masks", "initial_model_state_dict"]
+    }
     results_serializable = make_serializable(results_to_serialize)
     results_path = result_dir / "results.json"
     with open(results_path, 'w') as f:
@@ -1500,6 +1523,9 @@ def hybrid_pruning(
     save_summary_csv(summary_path, results)
 
     # Save final model state and masks
+    if "initial_model_state_dict" in results:
+        initial_model_path = result_dir / "initial_model.pt"
+        torch.save(results["initial_model_state_dict"], initial_model_path)
     if "model" in results:
         final_model_path = result_dir / "final_model.pt"
         torch.save(results["model"].state_dict(), final_model_path)

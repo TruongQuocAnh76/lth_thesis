@@ -593,6 +593,7 @@ def hybrid_pruning(
     # Initial masks (all ones)
     initial_weights = get_prunable_layers(raw_model)
     masks = create_initial_masks(initial_weights)
+    initial_model_state_dict = copy.deepcopy(raw_model.state_dict())
 
     # ------------------------------------------------------------------ #
     # Resume from checkpoint (if provided)
@@ -806,10 +807,21 @@ def hybrid_pruning(
 
     results["final_results"] = {
         "final_sparsity": final_sparsity,
+        "overall_sparsity": final_sparsity,
         "final_test_accuracy": final_test_acc,
+        "final_train_accuracy": (
+            results["phases"][-1]["train_accs"][-1]
+            if results["phases"] and results["phases"][-1].get("train_accs")
+            else (
+                results.get("initial_training", {}).get("train_accs", [])[-1]
+                if results.get("initial_training", {}).get("train_accs")
+                else None
+            )
+        ),
         "best_phase_test_accuracy": best_phase_acc,
         "initial_test_accuracy": init_test_acc,
         "total_time_seconds": total_time,
+        "training_computational_cost_seconds": total_time,
         "stopped_early": stopped_early,
         **efficiency_metrics,
     }
@@ -829,7 +841,12 @@ def hybrid_pruning(
     print(f"{'='*60}")
 
     # Attach model & masks for downstream usage
+    results["train_history"] = {
+        "initial_training": copy.deepcopy(results.get("initial_training", {})),
+        "phases": copy.deepcopy(results.get("phases", [])),
+    }
     results["model"] = model
     results["masks"] = masks
+    results["initial_model_state_dict"] = initial_model_state_dict
 
     return results
