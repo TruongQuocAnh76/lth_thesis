@@ -362,10 +362,13 @@ class IMPExperiment:
         experiment_name = f"imp_{self.model_name}_{self.dataset_name}_s{self.target_sparsity}_seed{self.seed}"
         result_dir = self.save_dir / "imp" / experiment_name / timestamp
         result_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Convert numpy arrays in results to lists for JSON serialization
         results_serializable = self._make_serializable(self.results)
-        
+
+        # Ensure all efficiency metric keys are present in final_results
+        results_serializable['final_results'] = _ensure_efficiency_metric_keys(results_serializable['final_results'])
+
         # Save JSON results
         results_path = result_dir / "results.json"
         with open(results_path, 'w') as f:
