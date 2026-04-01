@@ -1615,6 +1615,14 @@
     "best_phase_test_accuracy": 91.58,
     "initial_test_accuracy": 91.25,
     "total_time_seconds": 6202.551452875137,
-    "stopped_early": false
+    "stopped_early": false,
+    "flops_reduction": 1.3131874741657066,
+    "dense_flops": 81626378.0,
+    "pruned_flops": 62158967.859375,
+    "dense_latency_ms": 3.5276046999996424,
+    "pruned_latency_ms": 3.685152766666988,
+    "dense_throughput": 283.47847478491605,
+    "pruned_throughput": 271.3591710621113,
+    "training_computational_cost_seconds": 6202.551452875137
   }
 }
