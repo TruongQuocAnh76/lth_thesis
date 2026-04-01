@@ -3047,6 +3047,14 @@ def recompute_efficiency_metrics_for_existing_run(
         print("CUDA requested but unavailable; falling back to CPU for metric recomputation.")
         requested_device = torch.device("cpu")
 
+
+    def _strip_module_prefix(state_dict):
+        # Remove 'module.' prefix from all keys if present
+        if not any(k.startswith('module.') for k in state_dict.keys()):
+            return state_dict
+        print("[recompute_metrics] Detected 'module.' prefix in state_dict keys. Stripping prefix for compatibility.")
+        return {k[7:] if k.startswith('module.') else k: v for k, v in state_dict.items()}
+
     final_state_payload = torch.load(final_model_path, map_location="cpu", weights_only=False)
     if isinstance(final_state_payload, dict) and "state_dict" in final_state_payload:
         final_state_dict = final_state_payload["state_dict"]
@@ -3054,6 +3062,9 @@ def recompute_efficiency_metrics_for_existing_run(
         final_state_dict = final_state_payload
     else:
         raise ValueError(f"Unexpected model payload format at {final_model_path}")
+
+    # Normalize state_dict keys if needed
+    final_state_dict = _strip_module_prefix(final_state_dict)
 
     masks_payload = torch.load(final_masks_path, map_location="cpu", weights_only=False)
     if not isinstance(masks_payload, dict):
