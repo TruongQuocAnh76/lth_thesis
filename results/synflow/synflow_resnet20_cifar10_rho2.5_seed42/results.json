@@ -705,6 +705,14 @@
     "overall_sparsity": 0.6000051680349654,
     "pruning_time_seconds": 2.4369723796844482,
     "training_time_seconds": 2491.2262003421783,
-    "total_time_seconds": 2498.811500310898
+    "total_time_seconds": 2498.811500310898,
+    "flops_reduction": 1.5535861945284521,
+    "dense_flops": 81626378.0,
+    "pruned_flops": 52540617.5,
+    "dense_latency_ms": 4.00088763334073,
+    "pruned_latency_ms": 3.1733510666678435,
+    "dense_throughput": 249.94453522430044,
+    "pruned_throughput": 315.12428943137496,
+    "training_computational_cost_seconds": 2498.811500310898
   }
 }
