@@ -700,6 +700,14 @@
   "final_results": {
     "best_test_accuracy": 64.99,
     "final_test_accuracy": 64.26,
-    "overall_sparsity": 0.30000072291943786
+    "overall_sparsity": 0.30000072291943786,
+    "flops_reduction": 1.5417478911018228,
+    "dense_flops": 81637988.0,
+    "pruned_flops": 52951580.78125,
+    "dense_latency_ms": 3.817431233331566,
+    "pruned_latency_ms": 3.9131892666697845,
+    "dense_throughput": 261.9562577234104,
+    "pruned_throughput": 255.5460346672737,
+    "training_computational_cost_seconds": 1944.0
   }
 }

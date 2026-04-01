@@ -698,8 +698,17 @@
     ]
   },
   "final_results": {
-    "best_test_accuracy": 90.0,
+    "final_sparsity": 0.6000014765814187,
+    "overall_sparsity": 0.6000014765814187,
     "final_test_accuracy": 89.87,
-    "overall_sparsity": 0.6000014765814187
+    "training_computational_cost_seconds": 1844.0,
+    "flops_reduction": 2.308290389462253,
+    "dense_flops": 81626378.0,
+    "pruned_flops": 35362265.671875,
+    "dense_latency_ms": 3.9175989333368006,
+    "pruned_latency_ms": 3.926047633331109,
+    "dense_throughput": 255.25839092166936,
+    "pruned_throughput": 254.70908491029596,
+    "best_test_accuracy": 90.0
   }
 }
