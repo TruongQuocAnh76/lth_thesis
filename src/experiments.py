@@ -3060,6 +3060,20 @@ def recompute_efficiency_metrics_for_existing_run(
         raise ValueError(f"Unexpected mask payload format at {final_masks_path}")
     masks_np = _to_numpy_masks(masks_payload)
 
+
+    # Canonical metrics from RESULTS_FORMAT.md
+    canonical_keys = [
+        "flops_reduction",
+        "dense_flops",
+        "pruned_flops",
+        "dense_latency_ms",
+        "pruned_latency_ms",
+        "dense_throughput",
+        "pruned_throughput",
+        "training_computational_cost_seconds",
+    ]
+
+    # Compute efficiency metrics (FLOPS, latency, throughput)
     efficiency_metrics = compute_efficiency_metrics(
         model_name=model_name,
         num_classes=num_classes,
@@ -3071,11 +3085,25 @@ def recompute_efficiency_metrics_for_existing_run(
     )
 
     final_results = dict(results.get("final_results", {}))
-    final_results.update(efficiency_metrics)
+    # Update with recomputed metrics
+    for key in canonical_keys:
+        if key in efficiency_metrics and (final_results.get(key) is None):
+            final_results[key] = efficiency_metrics[key]
+
+    # Special handling for training cost
     if final_results.get("training_computational_cost_seconds") is None:
-        final_results["training_computational_cost_seconds"] = final_results.get(
-            "total_time_seconds"
-        )
+        # Try to use total_time_seconds if present
+        if final_results.get("total_time_seconds") is not None:
+            final_results["training_computational_cost_seconds"] = final_results["total_time_seconds"]
+        else:
+            print("[recompute_metrics] WARNING: Could not infer training_computational_cost_seconds (missing total_time_seconds)")
+            final_results["training_computational_cost_seconds"] = None
+
+    # Warn for any canonical metric still missing
+    for key in canonical_keys:
+        if final_results.get(key) is None:
+            print(f"[recompute_metrics] WARNING: Could not recompute metric '{key}' (insufficient data)")
+
     results["final_results"] = _ensure_efficiency_metric_keys(final_results)
 
     backup_path = run_dir / f"results_before_metrics_recompute_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
@@ -3084,8 +3112,14 @@ def recompute_efficiency_metrics_for_existing_run(
     with open(results_path, "w") as f:
         json.dump(_convert_to_serializable(results), f, indent=2)
 
+
     print(f"Metrics recomputed and saved to: {results_path}")
     print(f"Backup created at: {backup_path}")
+
+    # Print all canonical metrics after recomputation
+    print("\n[recompute_metrics] Final canonical metrics:")
+    for key in canonical_keys:
+        print(f"  {key}: {results['final_results'].get(key)}")
 
     return {
         "run_dir": str(run_dir),
