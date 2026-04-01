@@ -3015,6 +3015,7 @@ def recompute_efficiency_metrics_for_existing_run(
     override_model_name: Optional[str] = None,
     override_dataset_name: Optional[str] = None,
     override_num_classes: Optional[int] = None,
+    masks_filename: str = "final_masks.pt",
 ) -> Dict[str, Any]:
     """Backfill canonical efficiency metrics for an existing experiment output."""
     run_dir = Path(result_dir).expanduser().resolve()
@@ -3023,7 +3024,7 @@ def recompute_efficiency_metrics_for_existing_run(
 
     results_path = run_dir / "results.json"
     final_model_path = run_dir / "final_model.pt"
-    final_masks_path = run_dir / "final_masks.pt"
+    final_masks_path = run_dir / masks_filename
     for path in (results_path, final_model_path, final_masks_path):
         if not path.is_file():
             raise FileNotFoundError(f"Required artifact missing: {path}")
@@ -3251,6 +3252,7 @@ def run_experiment(
             override_model_name=kwargs.get("override_model_name"),
             override_dataset_name=kwargs.get("override_dataset_name"),
             override_num_classes=kwargs.get("override_num_classes"),
+            masks_filename=kwargs.get("masks_filename", "final_masks.pt"),
         )
 
     if algorithm.lower() == "imp":
@@ -3975,6 +3977,8 @@ Examples:
     metrics_group = parser.add_argument_group('Metrics recomputation arguments')
     metrics_group.add_argument("--result_dir", type=str, default=None,
                               help="Existing run directory with results.json/final_model.pt/final_masks.pt")
+    metrics_group.add_argument("--masks_filename", type=str, default="final_masks.pt",
+                              help="Mask file name (default: final_masks.pt)")
     metrics_group.add_argument("--override_model_name", type=str, default=None,
                               help="Override model name when results.json config is incomplete")
     metrics_group.add_argument("--override_dataset_name", type=str, default=None,
@@ -4143,6 +4147,7 @@ Examples:
 
         elif args.algorithm == "recompute_metrics":
             kwargs['result_dir'] = args.result_dir
+            kwargs['masks_filename'] = args.masks_filename
             kwargs['override_model_name'] = args.override_model_name
             kwargs['override_dataset_name'] = args.override_dataset_name
             kwargs['override_num_classes'] = args.override_num_classes
