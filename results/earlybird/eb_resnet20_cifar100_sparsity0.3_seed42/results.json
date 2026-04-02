@@ -25,7 +25,7 @@
     "convergence_epoch": 7,
     "best_test_accuracy": 62.43,
     "test_accuracy_at_convergence": 9.29,
-    "final_sparsity": 24.69939446366782
+    "final_sparsity": 0.2469939446366782
   },
   "search_history": {
     "epoch": [
