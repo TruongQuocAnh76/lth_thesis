@@ -960,14 +960,7 @@ class EarlyBirdExperiment:
         num_epochs: int
     ) -> Dict[str, Any]:
         """Train while searching for Early-Bird ticket via BN γ convergence.
-        
-        Key difference from old implementation:
-        - Checks mask at END of each EPOCH (not every step)
-        - Uses BN γ values (not weight magnitudes)
-        - Uses max(last K distances) < ε (not consecutive counter)
-        
-        Returns:
-            Dictionary with training history and convergence info
+        Stops immediately after convergence is detected.
         """
         train_losses = []
         train_accs = []
@@ -976,6 +969,7 @@ class EarlyBirdExperiment:
         
         converged = False
         convergence_epoch = -1
+        actual_epochs = 0
         
         print(f"Searching for Early-Bird ticket via BN γ convergence...")
         print(f"L1 regularization coefficient: {self.l1_coef}")
@@ -999,9 +993,9 @@ class EarlyBirdExperiment:
                 scheduler.step()
             
             # *** EPOCH-LEVEL MASK CHECK (correct Early-Bird behavior) ***
+            distance = None
             if not converged:
                 conv, distance = finder.record_epoch(model, epoch)
-                
                 if conv:
                     converged = True
                     convergence_epoch = epoch
@@ -1009,13 +1003,21 @@ class EarlyBirdExperiment:
                     print(f"\n🎯 Early-Bird ticket found at epoch {epoch}!")
                     print(f"   Max of last {self.patience} distances: {stats.get('max_last_k', 'N/A'):.6f}")
                     print(f"   Threshold: {self.distance_threshold}")
-            
+                    actual_epochs = epoch + 1
+                    pbar.set_postfix({
+                        'train_acc': f'{train_acc:.2f}%',
+                        'test_acc': f'{test_acc:.2f}%',
+                        'converged': converged,
+                        'dist': f'{distance:.4f}' if distance is not None else 'N/A'
+                    })
+                    break
             pbar.set_postfix({
                 'train_acc': f'{train_acc:.2f}%',
                 'test_acc': f'{test_acc:.2f}%',
                 'converged': converged,
                 'dist': f'{distance:.4f}' if distance is not None else 'N/A'
             })
+            actual_epochs = epoch + 1
         
         return {
             'train_losses': train_losses,
@@ -1024,7 +1026,7 @@ class EarlyBirdExperiment:
             'test_accs': test_accs,
             'converged': converged,
             'convergence_epoch': convergence_epoch,
-            'total_epochs': num_epochs
+            'total_epochs': actual_epochs
         }
     
     def run(self) -> Dict[str, Any]:
