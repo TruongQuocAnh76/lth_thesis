@@ -291,6 +291,21 @@ def _finetune(
     Returns:
         Dictionary with fine-tuning history and best accuracy.
     """
+    if max_epochs < 1:
+        raise ValueError("max_epochs must be >= 1")
+
+    effective_patience = patience
+    if max_epochs > 2 and patience >= max_epochs:
+        # Avoid inert early stopping when patience covers the full budget.
+        effective_patience = max_epochs - 2
+        if verbose:
+            print(
+                f"  [warn] {desc}: patience={patience} >= max_epochs={max_epochs}; "
+                f"using patience={effective_patience}"
+            )
+    elif max_epochs <= 2:
+        effective_patience = 1
+
     optimizer = optim.SGD(
         model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay
     )
@@ -299,7 +314,7 @@ def _finetune(
         if scheduler_type == "cosine"
         else None
     )
-    stopper = EarlyStopper(patience=patience, mode="max")
+    stopper = EarlyStopper(patience=effective_patience, mode="max")
     scaler = GradScaler() if torch.cuda.is_available() else None
 
     # Put teacher in eval mode once; it stays frozen throughout fine-tuning

@@ -189,8 +189,8 @@ python -m src.experiments --algorithm hybrid \
     --oneshot_ratio 0.7 \
     --initial_epochs 160 \
     --oneshot_finetune_max_epochs 200 \
-    --oneshot_finetune_patience 200 \
-    --iter_finetune_max_epochs 10 \
+    --oneshot_finetune_patience 50 \
+    --iter_finetune_max_epochs 30 \
     --iter_finetune_patience 10
 ```
 
@@ -201,9 +201,11 @@ python -m src.experiments --algorithm hybrid \
 - `--initial_epochs`: Dense training epochs (default: 160)
 - `--initial_lr`: Learning rate for initial training (default: 0.01).
 - `--oneshot_finetune_max_epochs`: Max epochs for fine-tuning after one-shot prune (default: 200)
-- `--oneshot_finetune_patience`: Early-stopping patience for one-shot fine-tuning (default: 200)
-- `--iter_finetune_max_epochs`: Max epochs per iterative fine-tuning step (default: 10)
+- `--oneshot_finetune_patience`: Early-stopping patience for one-shot fine-tuning (default: 50)
+- `--iter_finetune_max_epochs`: Max epochs per iterative fine-tuning step (default: 30)
 - `--iter_finetune_patience`: Early-stopping patience per iterative step (default: 10)
+- `--oneshot_scheduler_type`: Scheduler for one-shot fine-tuning (`cosine` or `none`, default: `cosine`)
+- `--iter_scheduler_type`: Scheduler for iterative fine-tuning (`cosine` or `none`, default: `none` = constant LR)
 
 ### 6. SynFlow (Synaptic Flow)
 
@@ -248,6 +250,8 @@ python -m src.experiments --algorithm hybrid_improve \
 - `--oneshot_finetune_patience`: Patience for Phase 2 (default: 100)
 - `--iter_finetune_max_epochs`: Max epochs per Phase 3 step (default: 10)
 - `--iter_finetune_patience`: Patience per Phase 3 step (default: 5)
+- `--oneshot_scheduler_type`: Scheduler for one-shot fine-tuning (`cosine` or `none`, default: `cosine`)
+- `--iter_scheduler_type`: Scheduler for iterative fine-tuning (`cosine` or `none`, default: `none` = constant LR)
 
 **Advanced Features:**
 - `--checkpoint_interval`: Save checkpoint every N pruning stages (default: 1).

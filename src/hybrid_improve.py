@@ -351,6 +351,21 @@ def _finetune(
     Returns:
         Dictionary with fine-tuning history and best accuracy.
     """
+    if max_epochs < 1:
+        raise ValueError("max_epochs must be >= 1")
+
+    effective_patience = patience
+    if max_epochs > 2 and patience >= max_epochs:
+        # Avoid inert early stopping when patience covers the full budget.
+        effective_patience = max_epochs - 2
+        if verbose:
+            print(
+                f"  [warn] {desc}: patience={patience} >= max_epochs={max_epochs}; "
+                f"using patience={effective_patience}"
+            )
+    elif max_epochs <= 2:
+        effective_patience = 1
+
     optimizer = optim.SGD(
         model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay
     )
@@ -359,7 +374,7 @@ def _finetune(
         if scheduler_type == "cosine"
         else None
     )
-    stopper = EarlyStopper(patience=patience, mode="max")
+    stopper = EarlyStopper(patience=effective_patience, mode="max")
     # Restore optimizer / scheduler / stopper state when resuming mid-finetune
     if optimizer_state is not None:
         optimizer.load_state_dict(optimizer_state)
@@ -697,10 +712,13 @@ def hybrid_pruning(
     initial_lr: float = 0.01,
     # -- Fine-tuning after one-shot prune ---------------------------------
     oneshot_finetune_max_epochs: int = 200,
-    oneshot_finetune_patience: int = 200,
+    oneshot_finetune_patience: int = 100,
     # -- Fine-tuning after each iterative step ----------------------------
     iter_finetune_max_epochs: int = 10,
-    iter_finetune_patience: int = 10,
+    iter_finetune_patience: int = 5,
+    # -- Scheduler policy --------------------------------------------------
+    oneshot_scheduler_type: str = "cosine",
+    iter_scheduler_type: str = "none",
     # -- Shared training hyper-parameters ---------------------------------
     batch_size: int = 128,
     momentum: float = 0.9,
@@ -766,6 +784,10 @@ def hybrid_pruning(
             early stopper.
         iter_finetune_max_epochs: Maximum epochs per iterative step.
         iter_finetune_patience: Patience per iterative step.
+        oneshot_scheduler_type: Scheduler for one-shot fine-tuning
+            (``'cosine'`` or ``'none'``).
+        iter_scheduler_type: Scheduler for iterative fine-tuning
+            (``'none'`` keeps a constant LR throughout each short phase).
         batch_size: Training batch size.
         momentum: SGD momentum.
         weight_decay: L2 regularisation.
@@ -816,6 +838,18 @@ def hybrid_pruning(
     """
     device = torch.device(device if torch.cuda.is_available() else "cpu")
 
+    valid_scheduler_types = {"cosine", "none"}
+    if oneshot_scheduler_type not in valid_scheduler_types:
+        raise ValueError(
+            f"Invalid oneshot_scheduler_type='{oneshot_scheduler_type}'. "
+            f"Choose from {sorted(valid_scheduler_types)}"
+        )
+    if iter_scheduler_type not in valid_scheduler_types:
+        raise ValueError(
+            f"Invalid iter_scheduler_type='{iter_scheduler_type}'. "
+            f"Choose from {sorted(valid_scheduler_types)}"
+        )
+
     # Auto-select iterative step if not provided
     if iterative_step is None:
         iterative_step = 0.02 if target_sparsity > 0.8 else 0.10
@@ -851,6 +885,8 @@ def hybrid_pruning(
         "oneshot_finetune_patience": oneshot_finetune_patience,
         "iter_finetune_max_epochs": iter_finetune_max_epochs,
         "iter_finetune_patience": iter_finetune_patience,
+        "oneshot_scheduler_type": oneshot_scheduler_type,
+        "iter_scheduler_type": iter_scheduler_type,
         "batch_size": batch_size,
         "momentum": momentum,
         "weight_decay": weight_decay,
@@ -1226,6 +1262,19 @@ def hybrid_pruning(
         ft_patience = (
             oneshot_finetune_patience if is_oneshot else iter_finetune_patience
         )
+        ft_scheduler_type = (
+            oneshot_scheduler_type if is_oneshot else iter_scheduler_type
+        )
+        if ft_max_epochs > 2 and ft_patience >= ft_max_epochs:
+            adjusted_patience = ft_max_epochs - 2
+            if verbose:
+                print(
+                    f"  [warn] {phase_label}: patience={ft_patience} >= "
+                    f"max_epochs={ft_max_epochs}; using patience={adjusted_patience}"
+                )
+            ft_patience = adjusted_patience
+        elif ft_max_epochs <= 2:
+            ft_patience = 1
 
         # Determine if we should skip the prune for this step (resuming
         # mid-finetune or after a prune that was already saved).
@@ -1325,7 +1374,7 @@ def hybrid_pruning(
             momentum=momentum,
             weight_decay=weight_decay,
             patience=ft_patience,
-            scheduler_type="cosine",
+            scheduler_type=ft_scheduler_type,
             verbose=verbose,
             desc=f"FT {phase_label}",
             teacher_model=ft_teacher,
@@ -1351,6 +1400,7 @@ def hybrid_pruning(
             "finetune_epochs_run": ft_history["epochs_run"],
             "finetune_max_epochs": ft_max_epochs,
             "finetune_patience": ft_patience,
+            "scheduler_type": ft_scheduler_type,
             "best_test_acc": ft_history["best_test_acc"],
             "final_test_acc": phase_test_acc,
             "train_losses": ft_history["train_losses"],

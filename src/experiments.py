@@ -3716,10 +3716,24 @@ def run_experiment(
         iterative_step = kwargs.get('iterative_step', None)
         initial_epochs = kwargs.get('initial_epochs', 160)
         initial_lr = kwargs.get('initial_lr', 0.01)
-        oneshot_finetune_max_epochs = kwargs.get('oneshot_finetune_max_epochs', 200)
-        oneshot_finetune_patience = kwargs.get('oneshot_finetune_patience', 200)
-        iter_finetune_max_epochs = kwargs.get('iter_finetune_max_epochs', 10)
-        iter_finetune_patience = kwargs.get('iter_finetune_patience', 10)
+        oneshot_finetune_max_epochs = kwargs.get('oneshot_finetune_max_epochs')
+        if oneshot_finetune_max_epochs is None:
+            oneshot_finetune_max_epochs = 200
+        oneshot_finetune_patience = kwargs.get('oneshot_finetune_patience')
+        if oneshot_finetune_patience is None:
+            oneshot_finetune_patience = 50
+        iter_finetune_max_epochs = kwargs.get('iter_finetune_max_epochs')
+        if iter_finetune_max_epochs is None:
+            iter_finetune_max_epochs = 30
+        iter_finetune_patience = kwargs.get('iter_finetune_patience')
+        if iter_finetune_patience is None:
+            iter_finetune_patience = 10
+        oneshot_scheduler_type = kwargs.get('oneshot_scheduler_type')
+        if oneshot_scheduler_type is None:
+            oneshot_scheduler_type = 'cosine'
+        iter_scheduler_type = kwargs.get('iter_scheduler_type')
+        if iter_scheduler_type is None:
+            iter_scheduler_type = 'none'
         batch_size = kwargs.get('batch_size', 128)
         momentum = kwargs.get('momentum', 0.9)
         weight_decay = kwargs.get('weight_decay', 5e-4)
@@ -3747,6 +3761,8 @@ def run_experiment(
             oneshot_finetune_patience=oneshot_finetune_patience,
             iter_finetune_max_epochs=iter_finetune_max_epochs,
             iter_finetune_patience=iter_finetune_patience,
+            oneshot_scheduler_type=oneshot_scheduler_type,
+            iter_scheduler_type=iter_scheduler_type,
             batch_size=batch_size,
             momentum=momentum,
             weight_decay=weight_decay,
@@ -3858,10 +3874,24 @@ def run_experiment(
         iterative_step = kwargs.get('iterative_step', 0.02)
         initial_epochs = kwargs.get('initial_epochs', 100)
         initial_lr = kwargs.get('initial_lr', 0.1)
-        oneshot_finetune_max_epochs = kwargs.get('oneshot_finetune_max_epochs', 200)
-        oneshot_finetune_patience = kwargs.get('oneshot_finetune_patience', 100)
-        iter_finetune_max_epochs = kwargs.get('iter_finetune_max_epochs', 10)
-        iter_finetune_patience = kwargs.get('iter_finetune_patience', 5)
+        oneshot_finetune_max_epochs = kwargs.get('oneshot_finetune_max_epochs')
+        if oneshot_finetune_max_epochs is None:
+            oneshot_finetune_max_epochs = 200
+        oneshot_finetune_patience = kwargs.get('oneshot_finetune_patience')
+        if oneshot_finetune_patience is None:
+            oneshot_finetune_patience = 100
+        iter_finetune_max_epochs = kwargs.get('iter_finetune_max_epochs')
+        if iter_finetune_max_epochs is None:
+            iter_finetune_max_epochs = 10
+        iter_finetune_patience = kwargs.get('iter_finetune_patience')
+        if iter_finetune_patience is None:
+            iter_finetune_patience = 5
+        oneshot_scheduler_type = kwargs.get('oneshot_scheduler_type')
+        if oneshot_scheduler_type is None:
+            oneshot_scheduler_type = 'cosine'
+        iter_scheduler_type = kwargs.get('iter_scheduler_type')
+        if iter_scheduler_type is None:
+            iter_scheduler_type = 'none'
         batch_size = kwargs.get('batch_size', 128)
         momentum = kwargs.get('momentum', 0.9)
         weight_decay = kwargs.get('weight_decay', 5e-4)
@@ -3888,6 +3918,8 @@ def run_experiment(
             oneshot_finetune_patience=oneshot_finetune_patience,
             iter_finetune_max_epochs=iter_finetune_max_epochs,
             iter_finetune_patience=iter_finetune_patience,
+            oneshot_scheduler_type=oneshot_scheduler_type,
+            iter_scheduler_type=iter_scheduler_type,
             batch_size=batch_size,
             momentum=momentum,
             weight_decay=weight_decay,
@@ -4106,14 +4138,26 @@ Examples:
     hybrid_group.add_argument("--initial_lr", type=float, default=0.01,
                              help="Learning rate for initial training (default: 0.01). "
                                   "Fine-tuning uses 1/10th of this")
-    hybrid_group.add_argument("--oneshot_finetune_max_epochs", type=int, default=200,
-                             help="Max epochs for one-shot fine-tuning (default: 200)")
-    hybrid_group.add_argument("--oneshot_finetune_patience", type=int, default=200,
-                             help="Early-stopping patience for one-shot fine-tuning (default: 200)")
-    hybrid_group.add_argument("--iter_finetune_max_epochs", type=int, default=10,
-                             help="Max epochs per iterative fine-tuning step (default: 10)")
-    hybrid_group.add_argument("--iter_finetune_patience", type=int, default=10,
-                             help="Early-stopping patience per iterative step (default: 10)")
+    hybrid_group.add_argument("--oneshot_finetune_max_epochs", type=int, default=None,
+                             help="Max epochs for one-shot fine-tuning "
+                                  "(default: hybrid=200, hybrid_improve=200)")
+    hybrid_group.add_argument("--oneshot_finetune_patience", type=int, default=None,
+                             help="Early-stopping patience for one-shot fine-tuning "
+                                  "(default: hybrid=50, hybrid_improve=100)")
+    hybrid_group.add_argument("--iter_finetune_max_epochs", type=int, default=None,
+                             help="Max epochs per iterative fine-tuning step "
+                                  "(default: hybrid=30, hybrid_improve=10)")
+    hybrid_group.add_argument("--iter_finetune_patience", type=int, default=None,
+                             help="Early-stopping patience per iterative step "
+                                  "(default: hybrid=10, hybrid_improve=5)")
+    hybrid_group.add_argument("--oneshot_scheduler_type", type=str,
+                             choices=["cosine", "none"], default=None,
+                             help="Scheduler for one-shot fine-tuning "
+                                  "(default: cosine)")
+    hybrid_group.add_argument("--iter_scheduler_type", type=str,
+                             choices=["cosine", "none"], default=None,
+                             help="Scheduler for iterative fine-tuning "
+                                  "(default: none, i.e. constant LR)")
 
     # Common training arguments
     train_group = parser.add_argument_group('Training arguments')
@@ -4201,6 +4245,8 @@ Examples:
             kwargs['oneshot_finetune_patience'] = args.oneshot_finetune_patience
             kwargs['iter_finetune_max_epochs'] = args.iter_finetune_max_epochs
             kwargs['iter_finetune_patience'] = args.iter_finetune_patience
+            kwargs['oneshot_scheduler_type'] = args.oneshot_scheduler_type
+            kwargs['iter_scheduler_type'] = args.iter_scheduler_type
             kwargs['use_global_pruning'] = args.use_global_pruning
             kwargs['batch_size'] = args.batch_size if args.batch_size else 128
             kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 5e-4
@@ -4218,6 +4264,8 @@ Examples:
             kwargs['oneshot_finetune_patience'] = args.oneshot_finetune_patience
             kwargs['iter_finetune_max_epochs'] = args.iter_finetune_max_epochs
             kwargs['iter_finetune_patience'] = args.iter_finetune_patience
+            kwargs['oneshot_scheduler_type'] = args.oneshot_scheduler_type
+            kwargs['iter_scheduler_type'] = args.iter_scheduler_type
             kwargs['batch_size'] = args.batch_size if args.batch_size else 128
             kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 5e-4
             kwargs['resume_from'] = args.resume_from
