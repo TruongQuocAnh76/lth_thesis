@@ -207,7 +207,7 @@ def synflow_pruning(
         if num_to_keep < num_params:
             threshold, _ = torch.kthvalue(
                 all_scores.view(-1),
-                num_params - num_to_keep + 1
+                num_params - num_to_keep
             )
         else:
             threshold = torch.tensor(0.0)

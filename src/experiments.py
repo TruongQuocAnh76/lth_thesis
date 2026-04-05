@@ -63,6 +63,40 @@ from src.hybrid import hybrid_pruning
 from src.hybrid_improve import hybrid_pruning as hybrid_improve_pruning
 
 
+def _resolve_lr_milestones(
+    epochs: int,
+    lr_milestones: Optional[List[int]] = None,
+) -> List[int]:
+    """Resolve learning-rate milestones for an epoch budget.
+
+    If no milestones are provided, this keeps legacy behavior for
+    160-epoch runs by defaulting to 50% and 75% of total epochs
+    (e.g. 160 -> [80, 120]).
+    """
+    if epochs <= 0:
+        raise ValueError(f"epochs must be > 0, got {epochs}")
+
+    if lr_milestones is None:
+        first = max(1, int(0.50 * epochs))
+        second = max(first + 1, int(0.75 * epochs))
+        return [first, second]
+
+    cleaned = sorted({int(m) for m in lr_milestones if int(m) > 0})
+    if cleaned:
+        return cleaned
+    return [max(1, int(0.50 * epochs))]
+
+
+def _infer_num_classes(dataset_name: str) -> int:
+    """Infer number of classes from dataset name."""
+    dataset_key = dataset_name.lower()
+    if dataset_key == "moons":
+        return 2
+    if dataset_key in ["cifar10", "mnist"]:
+        return 10
+    return 100
+
+
 class IMPExperiment:
     """Iterative Magnitude Pruning (IMP) experiment runner.
     
@@ -898,10 +932,10 @@ class EarlyBirdExperiment:
         )
     
     def _create_scheduler(self, optimizer: optim.Optimizer, epochs: int) -> Any:
-        """Create learning rate scheduler (StepLR: 0.1→0.01 at 80, 0.001 at 120)."""
-        from torch.optim.lr_scheduler import StepLR, MultiStepLR
-        # Paper uses milestones at 80 and 120
-        return MultiStepLR(optimizer, milestones=[80, 120], gamma=0.1)
+        """Create learning rate scheduler with epoch-aware default milestones."""
+        from torch.optim.lr_scheduler import MultiStepLR
+        milestones = _resolve_lr_milestones(epochs)
+        return MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
     
     def _train_epoch_with_l1(
         self,
@@ -1497,7 +1531,7 @@ class GraSPExperiment:
         learning_rate: float = 0.1,
         momentum: float = 0.9,
         weight_decay: float = 1e-4,
-        lr_milestones: List[int] = [80, 120],
+        lr_milestones: Optional[List[int]] = None,
         lr_gamma: float = 0.1,
         samples_per_class: int = 10,
         grasp_T: float = 200.0,
@@ -1536,7 +1570,7 @@ class GraSPExperiment:
         self.learning_rate = learning_rate
         self.momentum = momentum
         self.weight_decay = weight_decay
-        self.lr_milestones = list(lr_milestones)
+        self.lr_milestones = _resolve_lr_milestones(self.epochs, lr_milestones)
         self.lr_gamma = lr_gamma
         self.samples_per_class = samples_per_class
         self.grasp_T = grasp_T
@@ -1762,7 +1796,7 @@ def run_grasp_experiment(
     grasp_T: float = 200.0,
     grasp_iters: int = 1,
     learning_rate: float = 0.1,
-    lr_milestones: List[int] = [80, 120],
+    lr_milestones: Optional[List[int]] = None,
     lr_gamma: float = 0.1,
     seed: int = 42,
     device: str = "cuda",
@@ -1788,7 +1822,7 @@ def run_grasp_experiment(
     Returns:
         Experiment results dictionary.
     """
-    num_classes = 10 if dataset_name.lower() == "cifar10" else 100
+    num_classes = _infer_num_classes(dataset_name)
 
     experiment = GraSPExperiment(
         model_name=model_name,
@@ -1878,7 +1912,7 @@ class GAExperiment:
         learning_rate: float = 0.1,
         momentum: float = 0.9,
         weight_decay: float = 1e-4,
-        lr_milestones: List[int] = [80, 120],
+        lr_milestones: Optional[List[int]] = None,
         lr_gamma: float = 0.1,
         seed: int = 42,
         device: str = "cuda",
@@ -1929,7 +1963,7 @@ class GAExperiment:
         self.learning_rate = learning_rate
         self.momentum = momentum
         self.weight_decay = weight_decay
-        self.lr_milestones = list(lr_milestones)
+        self.lr_milestones = _resolve_lr_milestones(self.epochs, lr_milestones)
         self.lr_gamma = lr_gamma
         self.seed = seed
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
@@ -2427,7 +2461,7 @@ def run_ga_experiment(
     post_prune: bool = True,
     epochs: int = 160,
     learning_rate: float = 0.1,
-    lr_milestones: List[int] = [80, 120],
+    lr_milestones: Optional[List[int]] = None,
     lr_gamma: float = 0.1,
     seed: int = 42,
     device: str = "cuda",
@@ -2456,7 +2490,7 @@ def run_ga_experiment(
     Returns:
         Experiment results dictionary.
     """
-    num_classes = 10 if dataset_name.lower() == "cifar10" else 100
+    num_classes = _infer_num_classes(dataset_name)
 
     experiment = GAExperiment(
         model_name=model_name,
@@ -2506,7 +2540,7 @@ class SynFlowExperiment:
         learning_rate: float = 0.1,
         momentum: float = 0.9,
         weight_decay: float = 1e-4,
-        lr_milestones: List[int] = [80, 120],
+        lr_milestones: Optional[List[int]] = None,
         lr_gamma: float = 0.1,
         seed: int = 42,
         device: str = "cuda",
@@ -2542,7 +2576,7 @@ class SynFlowExperiment:
         self.learning_rate = learning_rate
         self.momentum = momentum
         self.weight_decay = weight_decay
-        self.lr_milestones = list(lr_milestones)
+        self.lr_milestones = _resolve_lr_milestones(self.epochs, lr_milestones)
         self.lr_gamma = lr_gamma
         self.seed = seed
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
@@ -2784,7 +2818,7 @@ def run_synflow_experiment(
     synflow_iters: int = 100,
     epochs: int = 160,
     learning_rate: float = 0.1,
-    lr_milestones: List[int] = [80, 120],
+    lr_milestones: Optional[List[int]] = None,
     lr_gamma: float = 0.1,
     seed: int = 42,
     device: str = "cuda",
@@ -2808,7 +2842,7 @@ def run_synflow_experiment(
     Returns:
         Experiment results dictionary.
     """
-    num_classes = 10 if dataset_name.lower() == "cifar10" else 100
+    num_classes = _infer_num_classes(dataset_name)
 
     experiment = SynFlowExperiment(
         model_name=model_name,
@@ -3329,7 +3363,7 @@ def run_experiment(
         checkpoint_interval = kwargs.get('checkpoint_interval', 10)
         
         # Determine number of classes from dataset
-        num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
+        num_classes = _infer_num_classes(dataset)
         
         experiment = IMPExperiment(
             model_name=model,
@@ -3367,7 +3401,7 @@ def run_experiment(
         min_search_epochs = kwargs.get('min_search_epochs', 10)
         pruning_method = kwargs.get('pruning_method', 'global')
         
-        num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
+        num_classes = _infer_num_classes(dataset)
         
         experiment = EarlyBirdExperiment(
             model_name=model,
@@ -3399,7 +3433,8 @@ def run_experiment(
         total_epochs = kwargs.get('total_epochs', 160)
         batch_size = kwargs.get('batch_size', 128)
         learning_rate = kwargs.get('learning_rate', 0.1)
-        lr_milestones = kwargs.get('lr_milestones', [80, 120])
+        lr_milestones = kwargs.get('lr_milestones', None)
+        lr_milestones = _resolve_lr_milestones(total_epochs, lr_milestones)
         lr_gamma = kwargs.get('lr_gamma', 0.1)
         momentum = kwargs.get('momentum', 0.9)
         weight_decay = kwargs.get('weight_decay', 1e-4)
@@ -3411,7 +3446,7 @@ def run_experiment(
         verbose = kwargs.get('verbose', True)
         
         # Determine number of classes from dataset
-        num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
+        num_classes = _infer_num_classes(dataset)
         
         # Set seed
         set_seed(seed)
@@ -3552,13 +3587,13 @@ def run_experiment(
         learning_rate = kwargs.get('learning_rate', 0.1)
         momentum = kwargs.get('momentum', 0.9)
         weight_decay = kwargs.get('weight_decay', 1e-4)
-        lr_milestones = kwargs.get('lr_milestones', [80, 120])
+        lr_milestones = kwargs.get('lr_milestones', None)
         lr_gamma = kwargs.get('lr_gamma', 0.1)
         samples_per_class = kwargs.get('samples_per_class', 10)
         grasp_T = kwargs.get('grasp_T', 200.0)
         grasp_iters = kwargs.get('grasp_iters', 1)
 
-        num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
+        num_classes = _infer_num_classes(dataset)
 
         experiment = GraSPExperiment(
             model_name=model,
@@ -3589,10 +3624,10 @@ def run_experiment(
         learning_rate = kwargs.get('learning_rate', 0.1)
         momentum = kwargs.get('momentum', 0.9)
         weight_decay = kwargs.get('weight_decay', 1e-4)
-        lr_milestones = kwargs.get('lr_milestones', [80, 120])
+        lr_milestones = kwargs.get('lr_milestones', None)
         lr_gamma = kwargs.get('lr_gamma', 0.1)
 
-        num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
+        num_classes = _infer_num_classes(dataset)
 
         experiment = SynFlowExperiment(
             model_name=model,
@@ -3633,13 +3668,13 @@ def run_experiment(
         learning_rate = kwargs.get('learning_rate', 0.1)
         momentum = kwargs.get('momentum', 0.9)
         weight_decay = kwargs.get('weight_decay', 1e-4)
-        lr_milestones = kwargs.get('lr_milestones', [80, 120])
+        lr_milestones = kwargs.get('lr_milestones', None)
         lr_gamma = kwargs.get('lr_gamma', 0.1)
         resume_from = kwargs.get('resume_from', None)
         time_limit_seconds = kwargs.get('time_limit_seconds', None)
         checkpoint_interval = kwargs.get('checkpoint_interval', 10)
 
-        num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
+        num_classes = _infer_num_classes(dataset)
 
         experiment = GAExperiment(
             model_name=model,
@@ -3697,7 +3732,7 @@ def run_experiment(
         hybrid_name = f"hybrid_{model}_{dataset}_s{target_sparsity}_seed{seed}"
         checkpoint_dir = Path("./results") / "hybrid" / hybrid_name / "checkpoints"
 
-        num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
+        num_classes = _infer_num_classes(dataset)
 
         hybrid_results = hybrid_pruning(
             model_name=model,
@@ -3843,7 +3878,7 @@ def run_experiment(
         results = hybrid_improve_pruning(
             model_name=model,
             dataset_name=dataset,
-            num_classes=10 if dataset.lower() in ['cifar10', 'mnist'] else 100,
+            num_classes=_infer_num_classes(dataset),
             target_sparsity=target_sparsity,
             oneshot_ratio=oneshot_ratio,
             iterative_step=iterative_step,
@@ -4090,8 +4125,8 @@ Examples:
                             help="SGD momentum")
     train_group.add_argument("--weight_decay", type=float, default=None,
                             help="Weight decay (default: 5e-4 for IMP, 1e-4 for Early-Bird)")
-    train_group.add_argument("--lr_milestones", type=int, nargs="+", default=[80, 120],
-                            help="Learning rate milestones (Early-Bird ResNet)")
+    train_group.add_argument("--lr_milestones", type=int, nargs="+", default=None,
+                            help="Optional LR milestones (default: auto 50%% and 75%% of epochs)")
     train_group.add_argument("--lr_gamma", type=float, default=0.1,
                             help="Learning rate gamma (Early-Bird ResNet)")
     

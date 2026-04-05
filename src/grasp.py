@@ -11,7 +11,7 @@ Algorithm overview (one-shot, no training required):
   3. Form the gradient-flow scalar z = Σ (g_i)².
   4. Backprop z to obtain the Hessian–gradient product Hg = ∂z/∂θ.
   5. Score each weight:  S(θ) = −θ · Hg   (element-wise).
-  6. Keep the top-k weights by score; prune the rest.
+    6. Prune the top-p scores; keep the remaining weights.
 
 Reference implementation:
     GraSP/pruner/GraSP.py (Wang et al., 2020)
@@ -230,8 +230,8 @@ def grasp_masks_from_scores(
 ) -> Dict[nn.Module, torch.Tensor]:
     """Threshold GraSP scores into binary keep/prune masks.
 
-    **Higher** score ⇒ more important ⇒ **keep**.
-    We keep the top ``(1 − sparsity)`` fraction of weights.
+    GraSP removes weights with the **highest** scores and keeps the rest.
+    For pruning ratio ``p = sparsity``, keep ratio is ``1 - p``.
 
     Args:
         scores: Per-module GraSP scores from :func:`compute_grasp_scores`.
@@ -241,22 +241,25 @@ def grasp_masks_from_scores(
         Dictionary mapping the same ``nn.Module`` keys to float tensors
         of 0s and 1s (same shape as each layer's weight).
     """
-    eps = 1e-10
+    if not scores:
+        return {}
 
-    # Flatten, normalise, find threshold
-    all_scores = torch.cat([s.view(-1) for s in scores.values()])
-    norm_factor = torch.abs(all_scores.sum()) + eps
-    all_scores = all_scores / norm_factor
+    all_scores = torch.cat([s.reshape(-1) for s in scores.values()])
+    total_params = all_scores.numel()
+    num_to_keep = int((1 - sparsity) * total_params)
+    num_to_keep = min(max(num_to_keep, 1), total_params)
 
-    num_to_keep = int((1 - sparsity) * all_scores.numel())
-    num_to_keep = max(num_to_keep, 1)  # keep at least one weight
-    threshold, _ = torch.topk(all_scores, num_to_keep, sorted=True)
-    accept = threshold[-1]
+    # Keep the globally smallest scores (equivalently, prune top-p scores).
+    keep_flat = torch.zeros(total_params, dtype=torch.float32)
+    _, keep_idx = torch.topk(all_scores, k=num_to_keep, largest=False, sorted=False)
+    keep_flat[keep_idx] = 1.0
 
     masks: Dict[nn.Module, torch.Tensor] = {}
+    offset = 0
     for module, s in scores.items():
-        normalised = s.view(-1) / norm_factor
-        masks[module] = (normalised >= accept).float().view(s.shape)
+        n = s.numel()
+        masks[module] = keep_flat[offset : offset + n].view_as(s)
+        offset += n
 
     return masks
 
