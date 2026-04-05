@@ -459,6 +459,7 @@ def train_resnet20_earlybird(
     l1_coef: float = 1e-4,
     distance_threshold: float = 0.1,
     patience: int = 5,
+    min_search_epochs: int = 10,
     pruning_method: str = 'global',
     verbose: bool = True
 ) -> Dict[str, Any]:
@@ -483,6 +484,7 @@ def train_resnet20_earlybird(
         l1_coef: L1 regularization coefficient for BN γ
         distance_threshold: ε threshold for mask convergence
         patience: Number of epochs for convergence window
+        min_search_epochs: Minimum epochs before convergence can be declared
         pruning_method: 'global' or 'layerwise'
         verbose: Print progress
     
@@ -516,6 +518,7 @@ def train_resnet20_earlybird(
         target_sparsity=target_sparsity,
         patience=patience,
         distance_threshold=distance_threshold,
+        min_search_epochs=min_search_epochs,
         pruning_method=pruning_method
     )
     

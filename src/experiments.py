@@ -810,6 +810,7 @@ class EarlyBirdExperiment:
         pruning_method: str = 'global',
         patience: int = 5,
         distance_threshold: float = 0.1,
+        min_search_epochs: int = 10,
     ):
         """Initialize Early-Bird experiment.
         
@@ -831,6 +832,7 @@ class EarlyBirdExperiment:
             pruning_method: 'global' or 'layerwise' channel pruning
             patience: Window size K for max(last K distances) < ε check
             distance_threshold: ε threshold for convergence
+            min_search_epochs: Minimum epochs before convergence can be declared
         """
         self.model_name = model_name
         self.dataset_name = dataset_name
@@ -849,6 +851,7 @@ class EarlyBirdExperiment:
         self.pruning_method = pruning_method
         self.patience = patience
         self.distance_threshold = distance_threshold
+        self.min_search_epochs = min_search_epochs
         
         # Results storage
         self.results = {
@@ -877,6 +880,7 @@ class EarlyBirdExperiment:
             'pruning_method': self.pruning_method,
             'patience': self.patience,
             'distance_threshold': self.distance_threshold,
+            'min_search_epochs': self.min_search_epochs,
         }
     
     def _create_model(self) -> nn.Module:
@@ -973,6 +977,7 @@ class EarlyBirdExperiment:
         
         print(f"Searching for Early-Bird ticket via BN γ convergence...")
         print(f"L1 regularization coefficient: {self.l1_coef}")
+        print(f"Minimum search epochs before convergence check: {self.min_search_epochs}")
         pbar = tqdm(range(num_epochs), desc="Search Phase")
         
         for epoch in pbar:
@@ -1091,6 +1096,7 @@ class EarlyBirdExperiment:
             target_sparsity=self.target_sparsity,
             patience=self.patience,
             distance_threshold=self.distance_threshold,
+            min_search_epochs=self.min_search_epochs,
             pruning_method=self.pruning_method,
         )
         
@@ -1389,6 +1395,7 @@ def run_earlybird_experiment(
     search_epochs: int = 40,
     finetune_epochs: int = 160,
     l1_coef: float = 1e-4,
+    min_search_epochs: int = 10,
     seed: int = 42,
     device: str = "cuda",
     save_dir: str = "./results"
@@ -1408,6 +1415,7 @@ def run_earlybird_experiment(
         search_epochs: Epochs to search for ticket
         finetune_epochs: Epochs to train with ticket
         l1_coef: L1 regularization coefficient on BN γ (crucial for Early-Bird!)
+        min_search_epochs: Minimum epochs before convergence can be declared
         seed: Random seed
         device: Compute device
         save_dir: Results directory
@@ -1425,6 +1433,7 @@ def run_earlybird_experiment(
         search_epochs=search_epochs,
         finetune_epochs=finetune_epochs,
         l1_coef=l1_coef,
+        min_search_epochs=min_search_epochs,
         seed=seed,
         device=device,
         save_dir=save_dir
@@ -1450,6 +1459,7 @@ def run_quick_earlybird_test():
         search_epochs=5,  # Reduced search
         finetune_epochs=5,  # Reduced training
         l1_coef=1e-4,  # L1 on BN γ
+        min_search_epochs=0,  # allow convergence in very short debug runs
         seed=42,
         device="cuda" if torch.cuda.is_available() else "cpu",
         save_dir="./results"
@@ -3269,6 +3279,7 @@ def run_experiment(
             - l1_coef (float): L1 regularization for BN gamma (default: 1e-4)
             - distance_threshold (float): Convergence threshold (default: 0.1)
             - patience (int): Convergence window (default: 5)
+            - min_search_epochs (int): Minimum epochs before convergence (default: 10)
             - pruning_method (str): 'global' or 'layerwise' (default: 'global')
             
         Early-Bird ResNet:
@@ -3353,6 +3364,7 @@ def run_experiment(
         l1_coef = kwargs.get('l1_coef', 1e-4)
         distance_threshold = kwargs.get('distance_threshold', 0.1)
         patience = kwargs.get('patience', 5)
+        min_search_epochs = kwargs.get('min_search_epochs', 10)
         pruning_method = kwargs.get('pruning_method', 'global')
         
         num_classes = 10 if dataset.lower() in ['cifar10', 'mnist'] else 100
@@ -3371,6 +3383,7 @@ def run_experiment(
             l1_coef=l1_coef,
             distance_threshold=distance_threshold,
             patience=patience,
+            min_search_epochs=min_search_epochs,
             pruning_method=pruning_method,
             seed=seed,
             device=device
@@ -3393,6 +3406,7 @@ def run_experiment(
         l1_coef = kwargs.get('l1_coef', 1e-4)
         distance_threshold = kwargs.get('distance_threshold', 0.1)
         patience = kwargs.get('patience', 5)
+        min_search_epochs = kwargs.get('min_search_epochs', 10)
         pruning_method = kwargs.get('pruning_method', 'global')
         verbose = kwargs.get('verbose', True)
         
@@ -3424,6 +3438,7 @@ def run_experiment(
             l1_coef=l1_coef,
             distance_threshold=distance_threshold,
             patience=patience,
+            min_search_epochs=min_search_epochs,
             pruning_method=pruning_method,
             verbose=verbose
         )
@@ -3468,6 +3483,7 @@ def run_experiment(
                 'l1_coef': l1_coef,
                 'distance_threshold': distance_threshold,
                 'patience': patience,
+                'min_search_epochs': min_search_epochs,
                 'pruning_method': pruning_method,
             },
             'train_history': {
@@ -3965,6 +3981,8 @@ Examples:
                          help="Convergence threshold (Early-Bird)")
     eb_group.add_argument("--patience", type=int, default=5,
                          help="Convergence window (Early-Bird)")
+    eb_group.add_argument("--min_search_epochs", type=int, default=10,
+                         help="Minimum epochs before convergence is allowed (Early-Bird)")
     eb_group.add_argument("--pruning_method", type=str, default="global",
                          choices=["global", "layerwise"],
                          help="Pruning method (Early-Bird)")
@@ -4113,6 +4131,7 @@ Examples:
             kwargs['l1_coef'] = args.l1_coef
             kwargs['distance_threshold'] = args.distance_threshold
             kwargs['patience'] = args.patience
+            kwargs['min_search_epochs'] = args.min_search_epochs
             kwargs['pruning_method'] = args.pruning_method
             kwargs['batch_size'] = args.batch_size if args.batch_size else 256
             kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 1e-4
@@ -4202,6 +4221,7 @@ Examples:
         # Common arguments
         kwargs['learning_rate'] = args.learning_rate
         kwargs['momentum'] = args.momentum
+        kwargs['min_search_epochs'] = args.min_search_epochs
         
         # Run experiment
         results = run_experiment(

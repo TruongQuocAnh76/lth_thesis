@@ -108,7 +108,13 @@ def test_earlybirdfinder_converges_when_masks_stabilize():
         {'bn': np.array([0.99, 0.0])},  # mask [1,0]
         {'bn': np.array([0.98, 0.0])},  # mask [1,0]
     ]
-    finder = EarlyBirdFinder(target_sparsity=0.5, patience=2, distance_threshold=0.01, pruning_method='layerwise')
+    finder = EarlyBirdFinder(
+        target_sparsity=0.5,
+        patience=2,
+        distance_threshold=0.01,
+        min_search_epochs=0,
+        pruning_method='layerwise'
+    )
     # use record_from_bn_gammas to bypass model extraction
     conv_epoch = None
     for epoch, bn in enumerate(bn_epochs):
@@ -192,8 +198,65 @@ def test_early_bird_search_offline_detects_convergence():
         target_sparsity=0.5,
         patience=2,
         distance_threshold=1e-6,
+        min_search_epochs=0,
         pruning_method='layerwise'
     )
     # expect convergence (conv_epoch != -1)
     assert conv_epoch != -1
     assert ticket is not None
+
+
+def test_earlybirdfinder_does_not_converge_before_min_search_epochs():
+    # Masks stabilize early, but convergence must wait for min_search_epochs.
+    bn_epochs = [
+        {'bn': np.array([0.9, 0.8])},
+        {'bn': np.array([1.0, 0.01])},
+        {'bn': np.array([0.99, 0.0])},
+        {'bn': np.array([0.98, 0.0])},
+    ]
+    finder = EarlyBirdFinder(
+        target_sparsity=0.5,
+        patience=2,
+        distance_threshold=0.01,
+        min_search_epochs=4,
+        pruning_method='layerwise'
+    )
+
+    converged_flags = []
+    for epoch, bn in enumerate(bn_epochs):
+        converged, _ = finder.record_from_bn_gammas(bn, epoch)
+        converged_flags.append(converged)
+
+    # Epochs 0..2 are ineligible (need epoch index 3 for min_search_epochs=4).
+    assert converged_flags[:3] == [False, False, False]
+    assert converged_flags[3] is True
+    assert finder.get_statistics()['convergence_epoch'] == 3
+
+
+def test_early_bird_search_offline_respects_min_search_epochs_guard():
+    bn_epochs = [
+        {'bn': np.array([0.9, 0.8])},
+        {'bn': np.array([1.0, 0.01])},
+        {'bn': np.array([0.99, 0.0])},
+        {'bn': np.array([0.98, 0.0])},
+    ]
+    _, conv_epoch, _ = early_bird_search_offline(
+        bn_gammas_per_epoch=bn_epochs,
+        target_sparsity=0.5,
+        patience=2,
+        distance_threshold=0.01,
+        min_search_epochs=4,
+        pruning_method='layerwise'
+    )
+    assert conv_epoch == 3
+
+
+def test_earlybirdfinder_rejects_negative_min_search_epochs():
+    with pytest.raises(ValueError, match="min_search_epochs must be >= 0"):
+        EarlyBirdFinder(
+            target_sparsity=0.5,
+            patience=2,
+            distance_threshold=0.01,
+            min_search_epochs=-1,
+            pruning_method='layerwise'
+        )

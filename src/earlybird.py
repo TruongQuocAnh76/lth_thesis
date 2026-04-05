@@ -2,7 +2,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 from typing import Dict, List, Tuple, Optional
-from collections import deque
 
 
 def extract_bn_gammas(model: nn.Module) -> Dict[str, np.ndarray]:
@@ -225,6 +224,7 @@ class EarlyBirdFinder:
         target_sparsity: float,
         patience: int = 5,
         distance_threshold: float = 0.1,
+        min_search_epochs: int = 10,
         pruning_method: str = 'global'
     ):
         """Initialize Early-Bird finder.
@@ -233,11 +233,16 @@ class EarlyBirdFinder:
             target_sparsity: Fraction of channels to prune (0 to 1).
             patience: Window size K for convergence check (paper uses 5).
             distance_threshold: ε threshold for max(last K distances) < ε.
+            min_search_epochs: Minimum epochs before convergence can be declared.
             pruning_method: 'global' or 'layerwise' channel pruning.
         """
+        if min_search_epochs < 0:
+            raise ValueError("min_search_epochs must be >= 0")
+
         self.target_sparsity = target_sparsity
         self.patience = patience
         self.distance_threshold = distance_threshold
+        self.min_search_epochs = min_search_epochs
         self.pruning_method = pruning_method
         
         # Storage for epoch-level mask history
@@ -249,6 +254,33 @@ class EarlyBirdFinder:
         self.converged = False
         self.convergence_epoch: Optional[int] = None
         self.early_bird_mask: Optional[Dict[str, np.ndarray]] = None
+
+    def _epoch_is_eligible_for_convergence(self, epoch: int) -> bool:
+        """Return True when epoch satisfies the minimum search-epoch guard."""
+        return (epoch + 1) >= self.min_search_epochs
+
+    def _try_update_convergence(
+        self,
+        current_mask: Dict[str, np.ndarray],
+        epoch: int
+    ) -> None:
+        """Apply Early-Bird convergence rule when all guards are satisfied."""
+        if self.converged:
+            return
+
+        if not self._epoch_is_eligible_for_convergence(epoch):
+            return
+
+        if len(self.distance_history) < self.patience:
+            return
+
+        recent_distances = self.distance_history[-self.patience:]
+        max_recent = max(recent_distances)
+
+        if max_recent < self.distance_threshold:
+            self.converged = True
+            self.convergence_epoch = epoch
+            self.early_bird_mask = current_mask
     
     def reset(self):
         """Reset finder state for a new search."""
@@ -297,17 +329,9 @@ class EarlyBirdFinder:
             prev_mask = self.mask_history[-1]
             distance = compute_channel_mask_hamming_distance(prev_mask, current_mask)
             self.distance_history.append(distance)
-            
-            # Early-Bird convergence criterion: max(last K distances) < ε
-            # Use deque-like behavior for sliding window
-            if len(self.distance_history) >= self.patience:
-                recent_distances = self.distance_history[-self.patience:]
-                max_recent = max(recent_distances)
-                
-                if max_recent < self.distance_threshold and not self.converged:
-                    self.converged = True
-                    self.convergence_epoch = epoch
-                    self.early_bird_mask = current_mask
+
+            # Paper-aligned stability check, gated by minimum search epochs.
+            self._try_update_convergence(current_mask, epoch)
         
         self.mask_history.append(current_mask)
         self.epoch_history.append(epoch)
@@ -346,16 +370,9 @@ class EarlyBirdFinder:
             prev_mask = self.mask_history[-1]
             distance = compute_channel_mask_hamming_distance(prev_mask, current_mask)
             self.distance_history.append(distance)
-            
-            # Early-Bird convergence: max(last K distances) < ε
-            if len(self.distance_history) >= self.patience:
-                recent_distances = self.distance_history[-self.patience:]
-                max_recent = max(recent_distances)
-                
-                if max_recent < self.distance_threshold and not self.converged:
-                    self.converged = True
-                    self.convergence_epoch = epoch
-                    self.early_bird_mask = current_mask
+
+            # Keep offline behavior consistent with online convergence semantics.
+            self._try_update_convergence(current_mask, epoch)
         
         self.mask_history.append(current_mask)
         self.epoch_history.append(epoch)
@@ -391,6 +408,7 @@ class EarlyBirdFinder:
             'target_sparsity': self.target_sparsity,
             'distance_threshold': self.distance_threshold,
             'patience': self.patience,
+            'min_search_epochs': self.min_search_epochs,
             'pruning_method': self.pruning_method,
         }
         
@@ -412,6 +430,7 @@ def early_bird_search_offline(
     target_sparsity: float,
     patience: int = 5,
     distance_threshold: float = 0.1,
+    min_search_epochs: int = 10,
     pruning_method: str = 'global'
 ) -> Tuple[Dict[str, np.ndarray], int, List[float]]:
     """Run Early-Bird search on recorded BN γ snapshots (offline).
@@ -424,6 +443,7 @@ def early_bird_search_offline(
         target_sparsity: Fraction of channels to prune.
         patience: Window size K for convergence.
         distance_threshold: ε threshold for convergence.
+        min_search_epochs: Minimum epochs before convergence can be declared.
         pruning_method: 'global' or 'layerwise'.
     
     Returns:
@@ -436,6 +456,7 @@ def early_bird_search_offline(
         target_sparsity=target_sparsity,
         patience=patience,
         distance_threshold=distance_threshold,
+        min_search_epochs=min_search_epochs,
         pruning_method=pruning_method
     )
     

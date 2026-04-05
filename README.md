@@ -79,6 +79,7 @@ python -m src.experiments --algorithm earlybird_resnet \
 - `--l1_coef`: L1 regularization for BN γ (default: 1e-4)
 - `--distance_threshold`: Convergence threshold (default: 0.1)
 - `--patience`: Convergence window size (default: 5)
+- `--min_search_epochs`: Minimum epochs before convergence is allowed (default: 10)
 - `--pruning_method`: 'global' or 'layerwise' (default: 'global')
 
 ### 3. GraSP (Gradient Signal Preservation)
