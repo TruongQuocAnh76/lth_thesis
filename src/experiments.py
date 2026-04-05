@@ -15,7 +15,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import MultiStepLR
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 from tqdm import tqdm
@@ -204,6 +204,9 @@ class IMPExperiment:
             'use_global_pruning': self.use_global_pruning,
             'warmup_epochs': self.warmup_epochs,
             'prune_rate_per_iteration': self.prune_rate_per_iteration,
+            'lr_scheduler': 'multistep',
+            'lr_milestones': _resolve_lr_milestones(self.epochs_per_iteration),
+            'lr_gamma': 0.1,
             'resume_from': self.resume_from,
             'time_limit_seconds': self.time_limit_seconds,
             'checkpoint_interval': self.checkpoint_interval,
@@ -224,8 +227,9 @@ class IMPExperiment:
         )
     
     def _create_scheduler(self, optimizer: optim.Optimizer) -> Any:
-        """Create learning rate scheduler."""
-        return CosineAnnealingLR(optimizer, T_max=self.epochs_per_iteration)
+        """Create IMP paper-style learning rate scheduler."""
+        milestones = _resolve_lr_milestones(self.epochs_per_iteration)
+        return MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
 
     def _checkpoint_path(self) -> Path:
         """Return the canonical IMP checkpoint path."""
@@ -274,6 +278,9 @@ class IMPExperiment:
         masks: Dict[str, np.ndarray],
         initial_state_dict: Dict[str, Any],
         iteration_history: Dict[str, List[float]],
+        best_test_acc: float,
+        best_epoch_idx: int,
+        best_model_state_dict: Optional[Dict[str, Any]],
         elapsed_training_seconds: float,
     ) -> Path:
         """Save the active IMP iteration so the run can resume later."""
@@ -291,6 +298,9 @@ class IMPExperiment:
             'initial_state_dict': initial_state_dict,
             'results': copy.deepcopy(self.results),
             'iteration_history': copy.deepcopy(iteration_history),
+            'best_test_acc': best_test_acc,
+            'best_epoch_idx': best_epoch_idx,
+            'best_model_state_dict': copy.deepcopy(best_model_state_dict),
             'elapsed_training_seconds': elapsed_training_seconds,
         }
         torch.save(ckpt, ckpt_path)
@@ -397,6 +407,9 @@ class IMPExperiment:
         start_epoch = 0
         prior_training_seconds = 0.0
         iteration_history = self._empty_iteration_history()
+        best_test_acc = float("-inf")
+        best_epoch_idx = -1
+        best_model_state_dict = None
         resume_ckpt = None
 
         if self.resume_from and Path(self.resume_from).is_file():
@@ -411,6 +424,16 @@ class IMPExperiment:
             )
             iteration_history = copy.deepcopy(
                 resume_ckpt.get('iteration_history', self._empty_iteration_history())
+            )
+            best_test_acc = float(
+                resume_ckpt.get(
+                    'best_test_acc',
+                    max(iteration_history.get('test_accs', []), default=float("-inf")),
+                )
+            )
+            best_epoch_idx = int(resume_ckpt.get('best_epoch_idx', -1))
+            best_model_state_dict = copy.deepcopy(
+                resume_ckpt.get('best_model_state_dict')
             )
             self.results = copy.deepcopy(resume_ckpt.get('results', self.results))
             self.results['config'] = self._get_config_dict()
@@ -464,6 +487,9 @@ class IMPExperiment:
                 optimizer = self._create_optimizer(model)
                 scheduler = self._create_scheduler(optimizer)
                 history = self._empty_iteration_history()
+                best_test_acc = float("-inf")
+                best_epoch_idx = -1
+                best_model_state_dict = None
                 epoch_start = 0
                 print(f"Training for {self.epochs_per_iteration} epochs...")
 
@@ -494,6 +520,11 @@ class IMPExperiment:
                 history['test_losses'].append(test_loss)
                 history['test_accs'].append(test_acc)
 
+                if test_acc > best_test_acc:
+                    best_test_acc = test_acc
+                    best_epoch_idx = epoch
+                    best_model_state_dict = copy.deepcopy(model.state_dict())
+
                 pbar.set_postfix(
                     train_loss=f"{train_loss:.4f}",
                     train_acc=f"{train_acc:.2f}%",
@@ -517,6 +548,9 @@ class IMPExperiment:
                         masks=masks,
                         initial_state_dict=initial_state_dict,
                         iteration_history=history,
+                        best_test_acc=best_test_acc,
+                        best_epoch_idx=best_epoch_idx,
+                        best_model_state_dict=best_model_state_dict,
                         elapsed_training_seconds=elapsed_training_seconds,
                     )
 
@@ -534,6 +568,9 @@ class IMPExperiment:
                         masks=masks,
                         initial_state_dict=initial_state_dict,
                         iteration_history=history,
+                        best_test_acc=best_test_acc,
+                        best_epoch_idx=best_epoch_idx,
+                        best_model_state_dict=best_model_state_dict,
                         elapsed_training_seconds=elapsed_training_seconds,
                     )
                     remaining = self._time_remaining(wall_start)
@@ -577,6 +614,10 @@ class IMPExperiment:
             
             # Prune for next iteration (skip if last iteration)
             if iteration < self.num_iterations:
+                if best_model_state_dict is not None:
+                    model.load_state_dict(copy.deepcopy(best_model_state_dict))
+                    apply_masks_to_model(model, masks)
+
                 # Get trained weights for pruning decision
                 trained_weights = get_prunable_layers(model)
                 
@@ -595,6 +636,9 @@ class IMPExperiment:
             resume_ckpt = None
             start_epoch = 0
             iteration_history = self._empty_iteration_history()
+            best_test_acc = float("-inf")
+            best_epoch_idx = -1
+            best_model_state_dict = None
         
         # Final results
         final_sparsity = get_overall_sparsity(masks)

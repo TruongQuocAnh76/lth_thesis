@@ -48,6 +48,11 @@ python -m src.experiments --algorithm imp \
 - `--use_global_pruning`: Use global magnitude pruning (default: True)
 - `--warmup_epochs`: Warmup epochs (default: 5)
 
+IMP implementation notes:
+- LR scheduler uses `MultiStepLR` with milestones at 50% and 75% of `epochs_per_iteration` (`gamma=0.1`), matching paper-style IMP behavior.
+- For each iteration, pruning decisions are made from the best-validation checkpoint in that iteration.
+- Reported `test_accuracy` in iteration history remains the final-epoch value for backward compatibility; `best_test_accuracy` stores the best-epoch value.
+
 ### 2. Early-Bird (Channel Pruning with BN γ)
 
 #### VGG Models:
