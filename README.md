@@ -29,7 +29,37 @@ pip install torch torchvision tqdm numpy
 
 ## Running Experiments
 
-### 1. Iterative Magnitude Pruning (IMP)
+
+### 1. Dense Baseline (No Pruning)
+
+Run a dense (no pruning) baseline for comparison:
+
+```bash
+python -m src.experiments --algorithm dense \
+    --model resnet20 \
+    --dataset cifar10 \
+    --seed 42 \
+    --epochs 160 \
+    --batch_size 128 \
+    --learning_rate 0.1 \
+    --momentum 0.9 \
+    --weight_decay 5e-4 \
+    --lr_gamma 0.1 \
+    --device cuda
+```
+
+**Available Dense arguments:**
+- `--epochs`: Number of training epochs (default: 160)
+- `--batch_size`: Training batch size (default: 128)
+- `--learning_rate`: Initial learning rate (default: 0.1)
+- `--momentum`: SGD momentum (default: 0.9)
+- `--weight_decay`: Weight decay (default: 5e-4)
+- `--lr_milestones`: Epochs at which to reduce LR (default: [80, 120])
+- `--lr_gamma`: LR decay factor (default: 0.1)
+- `--device`: cuda or cpu (default: cuda)
+
+### 2. Iterative Magnitude Pruning (IMP)
+
 
 ```bash
 python -m src.experiments --algorithm imp \
@@ -38,7 +68,14 @@ python -m src.experiments --algorithm imp \
     --seed 42 \
     --target_sparsity 0.9 \
     --num_iterations 10 \
-    --epochs_per_iteration 160
+    --epochs_per_iteration 160 \
+    --batch_size 128 \
+    --learning_rate 0.1 \
+    --momentum 0.9 \
+    --weight_decay 5e-4 \
+    --use_global_pruning True \
+    --warmup_epochs 5 \
+    --device cuda
 ```
 
 **Available IMP arguments:**
@@ -55,6 +92,7 @@ IMP implementation notes:
 
 ### 2. Early-Bird (Channel Pruning with BN γ)
 
+
 #### VGG Models:
 ```bash
 python -m src.experiments --algorithm earlybird \
@@ -63,8 +101,19 @@ python -m src.experiments --algorithm earlybird \
     --seed 42 \
     --target_sparsity 0.5 \
     --search_epochs 160 \
-    --finetune_epochs 160
+    --finetune_epochs 160 \
+    --batch_size 256 \
+    --learning_rate 0.1 \
+    --momentum 0.9 \
+    --weight_decay 1e-4 \
+    --l1_coef 1e-4 \
+    --distance_threshold 0.1 \
+    --patience 5 \
+    --min_search_epochs 10 \
+    --pruning_method global \
+    --device cuda
 ```
+
 
 #### ResNet (Block-wise Pruning):
 ```bash
@@ -74,7 +123,16 @@ python -m src.experiments --algorithm earlybird_resnet \
     --seed 42 \
     --target_sparsity 0.5 \
     --total_epochs 160 \
-    --l1_coef 1e-4
+    --l1_coef 1e-4 \
+    --batch_size 128 \
+    --learning_rate 0.1 \
+    --momentum 0.9 \
+    --weight_decay 5e-4 \
+    --distance_threshold 0.1 \
+    --patience 5 \
+    --min_search_epochs 10 \
+    --pruning_method global \
+    --device cuda
 ```
 
 **Available Early-Bird arguments:**
@@ -91,6 +149,7 @@ python -m src.experiments --algorithm earlybird_resnet \
 
 One-shot pruning at initialization that preserves gradient flow:
 
+
 ```bash
 python -m src.experiments --algorithm grasp \
     --model resnet20 \
@@ -99,7 +158,15 @@ python -m src.experiments --algorithm grasp \
     --target_sparsity 0.9 \
     --epochs 160 \
     --samples_per_class 10 \
-    --grasp_T 200.0
+    --grasp_T 200.0 \
+    --grasp_iters 1 \
+    --batch_size 128 \
+    --learning_rate 0.1 \
+    --momentum 0.9 \
+    --weight_decay 1e-4 \
+    --lr_milestones 80 120 \
+    --lr_gamma 0.1 \
+    --device cuda
 ```
 
 **Available GraSP arguments:**
@@ -116,15 +183,32 @@ python -m src.experiments --algorithm grasp \
 Evolves binary masks over a fixed, randomly-initialised network, then trains
 the discovered sub-network from the masked initialization:
 
+
 ```bash
 python -m src.experiments --algorithm genetic \
     --model resnet20 \
     --dataset cifar10 \
     --seed 42 \
     --population_size 100 \
+    --rec_rate 0.3 \
+    --mut_rate 0.1 \
+    --mig_rate 0.1 \
+    --par_rate 0.3 \
     --min_generations 100 \
     --max_generations 200 \
-    --epochs 160
+    --stagnation_threshold 50 \
+    --use_adaptive_ab False \
+    --use_loss_fitness True \
+    --max_eval_batches 4 \
+    --post_prune True \
+    --epochs 160 \
+    --batch_size 128 \
+    --learning_rate 0.1 \
+    --momentum 0.9 \
+    --weight_decay 1e-4 \
+    --lr_milestones 80 120 \
+    --lr_gamma 0.1 \
+    --device cuda
 ```
 
 **Available GA arguments:**
@@ -185,6 +269,7 @@ The experiment will:
 Combines a large one-shot magnitude prune with iterative geometric refinement.
 Phases: dense training → large prune + extended fine-tune → iterative small prunes + short fine-tunes.
 
+
 ```bash
 python -m src.experiments --algorithm hybrid \
     --model resnet20 \
@@ -192,11 +277,20 @@ python -m src.experiments --algorithm hybrid \
     --seed 42 \
     --target_sparsity 0.9 \
     --oneshot_ratio 0.7 \
+    --iterative_step 0.02 \
     --initial_epochs 160 \
+    --initial_lr 0.01 \
     --oneshot_finetune_max_epochs 200 \
     --oneshot_finetune_patience 50 \
     --iter_finetune_max_epochs 30 \
-    --iter_finetune_patience 10
+    --iter_finetune_patience 10 \
+    --oneshot_scheduler_type cosine \
+    --iter_scheduler_type none \
+    --batch_size 128 \
+    --learning_rate 0.1 \
+    --momentum 0.9 \
+    --weight_decay 5e-4 \
+    --device cuda
 ```
 
 **Available Hybrid arguments:**
@@ -216,14 +310,22 @@ python -m src.experiments --algorithm hybrid \
 
 Data-free iterative pruning at initialization that preserves gradient flow:
 
+
 ```bash
 python -m src.experiments --algorithm synflow \
     --model resnet20 \
     --dataset cifar10 \
     --seed 42 \
     --rho 10 \
+    --synflow_iters 100 \
     --epochs 160 \
-    --synflow_iters 100
+    --batch_size 128 \
+    --learning_rate 0.1 \
+    --momentum 0.9 \
+    --weight_decay 1e-4 \
+    --lr_milestones 80 120 \
+    --lr_gamma 0.1 \
+    --device cuda
 ```
 
 **Available SynFlow arguments:**
@@ -235,14 +337,28 @@ python -m src.experiments --algorithm synflow \
 
 The improved hybrid variant features adaptive oneshot ratio estimation, Knowledge Distillation (KD) support, and optimized training loops.
 
+
 ```bash
 python -m src.experiments --algorithm hybrid_improve \
     --model resnet20 \
     --dataset cifar10 \
     --seed 42 \
     --target_sparsity 0.8 \
+    --oneshot_ratio 0.7 \
+    --iterative_step 0.02 \
     --initial_epochs 100 \
-    --oneshot_ratio 0.7
+    --initial_lr 0.1 \
+    --oneshot_finetune_max_epochs 200 \
+    --oneshot_finetune_patience 100 \
+    --iter_finetune_max_epochs 10 \
+    --iter_finetune_patience 5 \
+    --oneshot_scheduler_type cosine \
+    --iter_scheduler_type none \
+    --batch_size 128 \
+    --learning_rate 0.1 \
+    --momentum 0.9 \
+    --weight_decay 5e-4 \
+    --device cuda
 ```
 
 **Available Hybrid-Improve arguments:**

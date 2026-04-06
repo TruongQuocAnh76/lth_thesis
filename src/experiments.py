@@ -3028,6 +3028,159 @@ def run_quick_imp_test():
     return results
 
 
+def run_dense_experiment(
+    model_name: str = "resnet20",
+    dataset_name: str = "cifar10",
+    epochs: int = 160,
+    batch_size: int = 128,
+    learning_rate: float = 0.1,
+    momentum: float = 0.9,
+    weight_decay: float = 5e-4,
+    lr_milestones: Optional[List[int]] = None,
+    lr_gamma: float = 0.1,
+    seed: int = 42,
+    device: str = "cuda",
+    save_dir: str = "./results",
+) -> Dict[str, Any]:
+    """Run a dense (no pruning) baseline experiment and save artifacts.
+
+    This provides a reliable dense baseline for plotting and comparison
+    against sparse methods.
+    """
+    print(f"\n{'='*60}")
+    print("Starting Dense Baseline Experiment")
+    print(f"Model: {model_name}, Dataset: {dataset_name}")
+    print(f"Epochs: {epochs}")
+    print(f"Device: {device}")
+    print(f"{'='*60}\n")
+
+    set_seed(seed)
+    num_classes = _infer_num_classes(dataset_name)
+    device_obj = torch.device(device if torch.cuda.is_available() else "cpu")
+
+    loaders = get_dataloaders(dataset_name, batch_size=batch_size, num_workers=4)
+    train_loader = loaders['train']
+    test_loader = loaders['test']
+
+    model = get_model(model_name, num_classes=num_classes).to(device_obj)
+    initial_state_dict = copy.deepcopy(model.state_dict())
+
+    criterion = nn.CrossEntropyLoss()
+    initial_test_loss, initial_test_accuracy = evaluate(
+        model, test_loader, criterion, device_obj
+    )
+
+    optimizer = optim.SGD(
+        model.parameters(),
+        lr=learning_rate,
+        momentum=momentum,
+        weight_decay=weight_decay,
+    )
+    milestones = _resolve_lr_milestones(epochs, lr_milestones)
+    scheduler = MultiStepLR(optimizer, milestones=milestones, gamma=lr_gamma)
+
+    train_start = time.time()
+    history = train_epochs(
+        model=model,
+        train_loader=train_loader,
+        test_loader=test_loader,
+        criterion=criterion,
+        optimizer=optimizer,
+        num_epochs=epochs,
+        device=device_obj,
+        scheduler=scheduler,
+        masks=None,
+        apply_mask_fn=None,
+        verbose=True,
+    )
+    training_time = time.time() - train_start
+
+    best_test_accuracy = max(history['test_accs']) if history['test_accs'] else 0.0
+    final_test_accuracy = history['final_test_acc']
+    final_train_accuracy = history['train_accs'][-1] if history['train_accs'] else None
+
+    # Build all-ones masks for compatibility with metric/evaluation pipelines.
+    dense_masks = create_initial_masks(get_prunable_layers(model))
+    final_sparsity = get_overall_sparsity(dense_masks)
+
+    efficiency_metrics = compute_efficiency_metrics(
+        model_name=model_name,
+        num_classes=num_classes,
+        dataset_name=dataset_name,
+        device=device_obj,
+        final_state_dict=model.state_dict(),
+        masks=dense_masks,
+        mask_applier=apply_masks_to_model,
+    )
+
+    results = {
+        'config': {
+            'algorithm': 'dense',
+            'model_name': model_name,
+            'dataset_name': dataset_name,
+            'num_classes': num_classes,
+            'epochs': epochs,
+            'batch_size': batch_size,
+            'learning_rate': learning_rate,
+            'momentum': momentum,
+            'weight_decay': weight_decay,
+            'lr_milestones': milestones,
+            'lr_gamma': lr_gamma,
+            'seed': seed,
+        },
+        'training': {
+            'train_losses': history['train_losses'],
+            'train_accs': history['train_accs'],
+            'test_losses': history['test_losses'],
+            'test_accs': history['test_accs'],
+            'training_time_seconds': training_time,
+        },
+        'train_history': {
+            'dense_training': {
+                'train_losses': history['train_losses'],
+                'train_accs': history['train_accs'],
+                'test_losses': history['test_losses'],
+                'test_accs': history['test_accs'],
+            }
+        },
+        'final_results': {
+            'initial_test_accuracy': float(initial_test_accuracy),
+            'initial_test_loss': float(initial_test_loss),
+            'dense_test_accuracy': float(final_test_accuracy),
+            'final_test_accuracy': float(final_test_accuracy),
+            'best_test_accuracy': float(best_test_accuracy),
+            'final_train_accuracy': float(final_train_accuracy) if final_train_accuracy is not None else None,
+            'target_sparsity': 0.0,
+            'final_sparsity': float(final_sparsity),
+            'overall_sparsity': float(final_sparsity),
+            'training_computational_cost_seconds': float(training_time),
+            **efficiency_metrics,
+        },
+    }
+    results['final_results'] = _ensure_efficiency_metric_keys(results['final_results'])
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    result_name = f"dense_{model_name}_{dataset_name}_seed{seed}"
+    result_dir = Path(save_dir) / "dense" / result_name / timestamp
+    result_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(result_dir / "results.json", 'w') as f:
+        json.dump(_convert_to_serializable(results), f, indent=2)
+
+    _save_multiphase_summary_csv(
+        result_dir / "summary.csv",
+        [('dense_training', results['training'])],
+    )
+
+    torch.save(initial_state_dict, result_dir / "initial_model.pt")
+    torch.save(model.state_dict(), result_dir / "final_model.pt")
+    dense_masks_torch = {k: torch.from_numpy(v) for k, v in dense_masks.items()}
+    torch.save(dense_masks_torch, result_dir / "final_masks.pt")
+
+    print(f"Dense baseline results saved to: {result_dir}")
+    return results
+
+
 def _convert_to_serializable(obj):
     """Convert numpy types to Python native types for JSON serialization."""
     if isinstance(obj, dict):
@@ -3055,6 +3208,7 @@ def _ensure_efficiency_metric_keys(final_results: Dict[str, Any]) -> Dict[str, A
         "dense_throughput",
         "pruned_throughput",
         "training_computational_cost_seconds",
+        "dense_test_accuracy",
     ]
     for key in metric_keys:
         final_results.setdefault(key, None)
@@ -3381,7 +3535,7 @@ def run_experiment(
     """Unified experiment runner supporting multiple algorithms.
     
     Args:
-        algorithm: Algorithm to use ('imp', 'earlybird', 'earlybird_resnet',
+        algorithm: Algorithm to use ('dense', 'imp', 'earlybird', 'earlybird_resnet',
             'grasp', 'synflow', 'genetic', 'hybrid', 'hybrid_improve',
             'recompute_metrics')
         model: Model architecture ('resnet20', 'vgg16', etc.)
@@ -3448,6 +3602,31 @@ def run_experiment(
             override_dataset_name=kwargs.get("override_dataset_name"),
             override_num_classes=kwargs.get("override_num_classes"),
             masks_filename=kwargs.get("masks_filename", "final_masks.pt"),
+        )
+
+    if algorithm.lower() == "dense":
+        epochs = kwargs.get('epochs', 160)
+        batch_size = kwargs.get('batch_size', 128)
+        learning_rate = kwargs.get('learning_rate', 0.1)
+        momentum = kwargs.get('momentum', 0.9)
+        weight_decay = kwargs.get('weight_decay', 5e-4)
+        lr_milestones = kwargs.get('lr_milestones', None)
+        lr_gamma = kwargs.get('lr_gamma', 0.1)
+        save_dir = kwargs.get('save_dir', './results')
+
+        return run_dense_experiment(
+            model_name=model,
+            dataset_name=dataset,
+            epochs=epochs,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            momentum=momentum,
+            weight_decay=weight_decay,
+            lr_milestones=lr_milestones,
+            lr_gamma=lr_gamma,
+            seed=seed,
+            device=device,
+            save_dir=save_dir,
         )
 
     if algorithm.lower() == "imp":
@@ -4039,7 +4218,7 @@ def run_experiment(
 
     else:
         raise ValueError(f"Unknown algorithm: {algorithm}. "
-                         f"Choose from: imp, earlybird, earlybird_resnet, grasp, synflow, genetic, hybrid, hybrid_improve, recompute_metrics")
+                         f"Choose from: dense, imp, earlybird, earlybird_resnet, grasp, synflow, genetic, hybrid, hybrid_improve, recompute_metrics")
 
 
 if __name__ == "__main__":
@@ -4053,6 +4232,10 @@ Examples:
   # Run IMP on ResNet20 with CIFAR-10
   python -m src.experiments --algorithm imp --model resnet20 --dataset cifar10 --seed 42 \\
       --target_sparsity 0.9 --num_iterations 10 --epochs_per_iteration 160
+
+  # Run dense baseline on ResNet20 with CIFAR-10 (no pruning)
+  python -m src.experiments --algorithm dense --model resnet20 --dataset cifar10 --seed 42 \
+      --epochs 160 --batch_size 128 --learning_rate 0.1
 
   # Run Early-Bird on VGG16 with CIFAR-10
   python -m src.experiments --algorithm earlybird --model vgg16 --dataset cifar10 --seed 42 \\
@@ -4108,7 +4291,7 @@ Examples:
     
     # Main arguments
     parser.add_argument("--algorithm", type=str, default="imp",
-                       choices=["imp", "earlybird", "earlybird_resnet", "grasp", "synflow", "genetic", "hybrid", "hybrid_improve", "recompute_metrics"],
+                       choices=["dense", "imp", "earlybird", "earlybird_resnet", "grasp", "synflow", "genetic", "hybrid", "hybrid_improve", "recompute_metrics"],
                        help="Pruning algorithm to use")
     parser.add_argument("--model", type=str, default="resnet20",
                        help="Model architecture (resnet20, vgg16, etc.)")
@@ -4294,7 +4477,14 @@ Examples:
         # Build kwargs based on algorithm
         kwargs = {}
         
-        if args.algorithm == "imp":
+        if args.algorithm == "dense":
+            kwargs['epochs'] = args.epochs
+            kwargs['lr_milestones'] = args.lr_milestones
+            kwargs['lr_gamma'] = args.lr_gamma
+            kwargs['batch_size'] = args.batch_size if args.batch_size else 128
+            kwargs['weight_decay'] = args.weight_decay if args.weight_decay else 5e-4
+
+        elif args.algorithm == "imp":
             kwargs['target_sparsity'] = args.target_sparsity
             kwargs['num_iterations'] = args.num_iterations
             kwargs['epochs_per_iteration'] = args.epochs_per_iteration
@@ -4463,4 +4653,10 @@ Examples:
             print(f"Dense FLOPs: {fr.get('dense_flops', None)}")
             print(f"Pruned FLOPs: {fr.get('pruned_flops', None)}")
             print(f"FLOPs reduction: {fr.get('flops_reduction', None)}")
+        elif args.algorithm == "dense":
+            fr = results.get('final_results', {})
+            print(f"Initial Test Accuracy: {fr.get('initial_test_accuracy', 0):.2f}%")
+            print(f"Dense Test Accuracy: {fr.get('dense_test_accuracy', 0):.2f}%")
+            print(f"Final Test Accuracy: {fr.get('final_test_accuracy', 0):.2f}%")
+            print(f"Overall Sparsity: {fr.get('overall_sparsity', 0):.2%}")
         print(f"{'='*80}\n")
