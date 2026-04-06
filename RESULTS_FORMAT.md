@@ -43,6 +43,7 @@ Each experiment output directory contains the following files:
     "dense_throughput": 476.2,
     "pruned_throughput": 833.3,
     "training_computational_cost_seconds": 1234.56,
+    "dense_test_accuracy": 69.42067,
     ...
   },
   ...

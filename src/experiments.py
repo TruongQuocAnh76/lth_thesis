@@ -3208,6 +3208,7 @@ def recompute_efficiency_metrics_for_existing_run(
         "dense_throughput",
         "pruned_throughput",
         "training_computational_cost_seconds",
+        "dense_test_accuracy",
     ]
 
     final_results = dict(results.get("final_results", {}))
