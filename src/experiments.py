@@ -3212,26 +3212,21 @@ def recompute_efficiency_metrics_for_existing_run(
     ]
 
     final_results = dict(results.get("final_results", {}))
-
-    # Compute dense_test_accuracy using the final (trained) model
     dense_test_accuracy = final_results.get("dense_test_accuracy")
     if dense_test_accuracy is None:
-        try:
-            model = get_model(model_name, num_classes=num_classes)
-            state_dict = _load_state_dict_from_artifact(final_model_path)
-            model.load_state_dict(state_dict)
-            model.to(requested_device)
-            model.eval()
-            loaders = get_dataloaders(dataset_name, batch_size=int(config.get("batch_size", 128) or 128))
-            test_loader = loaders["test"]
-            criterion = nn.CrossEntropyLoss()
-            _, dense_test_accuracy = evaluate(model, test_loader, criterion, requested_device)
-            dense_test_accuracy = float(dense_test_accuracy)
-        except Exception as exc:
+        dense_test_accuracy = _compute_dense_test_accuracy_from_initial_model(
+            result_dir=run_dir,
+            model_name=model_name,
+            dataset_name=dataset_name,
+            num_classes=num_classes,
+            device=requested_device,
+            batch_size=int(config.get("batch_size", 128) or 128),
+        )
+        if dense_test_accuracy is None:
             print(
-                f"[recompute_metrics] WARNING: Could not compute dense_test_accuracy from final_model.pt: {exc}"
+                "[recompute_metrics] WARNING: Could not infer dense_test_accuracy "
+                "from initial_model.pt"
             )
-            dense_test_accuracy = None
 
     # Compute efficiency metrics (FLOPS, latency, throughput)
     efficiency_metrics = compute_efficiency_metrics(
