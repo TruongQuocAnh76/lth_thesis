@@ -265,7 +265,7 @@ python -m src.experiments --algorithm hybrid_improve \
 
 ### 8. Recompute Missing Canonical Metrics (Post-hoc)
 
-If a previous run folder contains `results.json`, `final_model.pt`, and `final_masks.pt` but misses canonical efficiency metrics (`flops_reduction`, `dense_flops`, `pruned_flops`, latency/throughput fields), you can backfill them without rerunning training:
+If a previous run folder contains `results.json`, `final_model.pt`, `final_masks.pt`, and optionally `initial_model.pt`, but misses canonical efficiency metrics (`flops_reduction`, `dense_flops`, `pruned_flops`, latency/throughput fields) or `dense_test_accuracy`, you can backfill them without rerunning training:
 
 ```bash
 python -m src.experiments --algorithm recompute_metrics \
@@ -274,7 +274,7 @@ python -m src.experiments --algorithm recompute_metrics \
 ```
 
 **Available recompute arguments:**
-- `--result_dir`: Existing run output folder (must contain `results.json`, `final_model.pt`, `final_masks.pt`)
+- `--result_dir`: Existing run output folder (must contain `results.json`, `final_model.pt`, `final_masks.pt`; `initial_model.pt` enables dense baseline backfill when available)
 - `--override_model_name`: Optional override if `results.json` config is missing `model_name`
 - `--override_dataset_name`: Optional override if `results.json` config is missing `dataset_name`
 - `--override_num_classes`: Optional override if class count cannot be inferred

@@ -3061,6 +3061,59 @@ def _ensure_efficiency_metric_keys(final_results: Dict[str, Any]) -> Dict[str, A
     return final_results
 
 
+def _load_state_dict_from_artifact(path: Path) -> Dict[str, Any]:
+    """Load a state_dict payload from a saved PyTorch artifact."""
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    if isinstance(payload, dict) and "state_dict" in payload:
+        state_dict = payload["state_dict"]
+    elif isinstance(payload, dict):
+        state_dict = payload
+    else:
+        raise ValueError(f"Unexpected model payload format at {path}")
+
+    if any(key.startswith("module.") for key in state_dict.keys()):
+        state_dict = {
+            key[7:] if key.startswith("module.") else key: value
+            for key, value in state_dict.items()
+        }
+
+    return state_dict
+
+
+def _compute_dense_test_accuracy_from_initial_model(
+    *,
+    result_dir: Path,
+    model_name: str,
+    dataset_name: str,
+    num_classes: int,
+    device: torch.device,
+    batch_size: int,
+) -> Optional[float]:
+    """Evaluate the saved dense initialization if it is available."""
+    initial_model_path = result_dir / "initial_model.pt"
+    if not initial_model_path.is_file():
+        return None
+
+    try:
+        model = get_model(model_name, num_classes=num_classes)
+        state_dict = _load_state_dict_from_artifact(initial_model_path)
+        model.load_state_dict(state_dict)
+        model.to(device)
+        model.eval()
+
+        loaders = get_dataloaders(dataset_name, batch_size=batch_size)
+        test_loader = loaders["test"]
+        criterion = nn.CrossEntropyLoss()
+        _, dense_test_accuracy = evaluate(model, test_loader, criterion, device)
+        return float(dense_test_accuracy)
+    except Exception as exc:
+        print(
+            "[recompute_metrics] WARNING: Could not compute dense_test_accuracy "
+            f"from {initial_model_path}: {exc}"
+        )
+        return None
+
+
 def _to_numpy_masks(mask_payload: Dict[str, Any]) -> Dict[str, np.ndarray]:
     """Convert loaded mask payloads to NumPy arrays."""
     masks_np: Dict[str, np.ndarray] = {}
@@ -3137,24 +3190,7 @@ def recompute_efficiency_metrics_for_existing_run(
         print("CUDA requested but unavailable; falling back to CPU for metric recomputation.")
         requested_device = torch.device("cpu")
 
-
-    def _strip_module_prefix(state_dict):
-        # Remove 'module.' prefix from all keys if present
-        if not any(k.startswith('module.') for k in state_dict.keys()):
-            return state_dict
-        print("[recompute_metrics] Detected 'module.' prefix in state_dict keys. Stripping prefix for compatibility.")
-        return {k[7:] if k.startswith('module.') else k: v for k, v in state_dict.items()}
-
-    final_state_payload = torch.load(final_model_path, map_location="cpu", weights_only=False)
-    if isinstance(final_state_payload, dict) and "state_dict" in final_state_payload:
-        final_state_dict = final_state_payload["state_dict"]
-    elif isinstance(final_state_payload, dict):
-        final_state_dict = final_state_payload
-    else:
-        raise ValueError(f"Unexpected model payload format at {final_model_path}")
-
-    # Normalize state_dict keys if needed
-    final_state_dict = _strip_module_prefix(final_state_dict)
+    final_state_dict = _load_state_dict_from_artifact(final_model_path)
 
     masks_payload = torch.load(final_masks_path, map_location="cpu", weights_only=False)
     if not isinstance(masks_payload, dict):
@@ -3174,6 +3210,23 @@ def recompute_efficiency_metrics_for_existing_run(
         "training_computational_cost_seconds",
     ]
 
+    final_results = dict(results.get("final_results", {}))
+    dense_test_accuracy = final_results.get("dense_test_accuracy")
+    if dense_test_accuracy is None:
+        dense_test_accuracy = _compute_dense_test_accuracy_from_initial_model(
+            result_dir=run_dir,
+            model_name=model_name,
+            dataset_name=dataset_name,
+            num_classes=num_classes,
+            device=requested_device,
+            batch_size=int(config.get("batch_size", 128) or 128),
+        )
+        if dense_test_accuracy is None:
+            print(
+                "[recompute_metrics] WARNING: Could not infer dense_test_accuracy "
+                "from initial_model.pt"
+            )
+
     # Compute efficiency metrics (FLOPS, latency, throughput)
     efficiency_metrics = compute_efficiency_metrics(
         model_name=model_name,
@@ -3185,11 +3238,13 @@ def recompute_efficiency_metrics_for_existing_run(
         mask_applier=apply_masks_to_model,
     )
 
-    final_results = dict(results.get("final_results", {}))
     # Update with recomputed metrics
     for key in canonical_keys:
         if key in efficiency_metrics and (final_results.get(key) is None):
             final_results[key] = efficiency_metrics[key]
+
+    if final_results.get("dense_test_accuracy") is None:
+        final_results["dense_test_accuracy"] = dense_test_accuracy
 
     # Special handling for training cost
     if final_results.get("training_computational_cost_seconds") is None:
@@ -3204,6 +3259,9 @@ def recompute_efficiency_metrics_for_existing_run(
     for key in canonical_keys:
         if final_results.get(key) is None:
             print(f"[recompute_metrics] WARNING: Could not recompute metric '{key}' (insufficient data)")
+
+    if final_results.get("dense_test_accuracy") is None:
+        print("[recompute_metrics] WARNING: dense_test_accuracy remains unavailable")
 
     results["final_results"] = _ensure_efficiency_metric_keys(final_results)
 
