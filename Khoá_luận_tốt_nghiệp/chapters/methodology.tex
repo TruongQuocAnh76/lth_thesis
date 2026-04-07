@@ -53,7 +53,7 @@
         Dựa trên nhận xét này, EB Tickets đề xuất một chiến lược huấn luyện hiệu quả gồm hai giai đoạn:
         \begin{enumerate}
             \item  Xác định sớm mạng con quan trọng bằng các phương án huấn luyện chi phí thấp
-                    (learning rate lớn, huấn luyện độ chính xác thấp, kết hợp dừng sớm), và
+                    (learning rate lớn, huấn luyện độ chính xác thấp, kết hợp dừng sớm).
             \item Tiếp tục huấn luyện chỉ mạng con đó đến độ chính xác mục tiêu.
                     Kết quả thực nghiệm cho thấy EB Train có thể tiết kiệm tới $5{,}8\times$--$10{,}7\times$ năng lượng
                     huấn luyện trong khi vẫn duy trì độ chính xác tương đương hoặc cao hơn so với huấn luyện toàn mô hình
@@ -209,7 +209,7 @@
         trong đó $p \in (0,1)$ là \emph{tỷ lệ tỉa} mong muốn và $\mathcal{A}$
         là thuật toán huấn luyện (ví dụ: SGD).
 
-        \paragraph{Tiêu chí tỉa dựa trên bảo toàn gradient.}
+        \paragraph{\textbf{Tiêu chí tỉa dựa trên bảo toàn gradient.}}
         Tại điểm khởi tạo $\symbfit{\theta}_0$, mức độ giảm hàm mất mát tại mỗi bước
         gradient descent được đặc trưng bởi đạo hàm có hướng:
         \begin{equation}
@@ -234,13 +234,16 @@
             + \mathcal{O}(\|\symbfit{\delta}\|_2^2),
             \label{eq:taylor_approx}
         \end{align}
-        trong đó $\mathbf{Hg} = \mathbf{H}\mathbf{g}$ là tích vector-Hessian
-        (Hessian-gradient product), $\mathbf{H} = \nabla^2\mathcal{L}(\symbfit{\theta}_0)$
-        và $\mathbf{g} = \nabla\mathcal{L}(\symbfit{\theta}_0)$.
-        Tích $\mathbf{Hg}$ có thể tính hiệu quả mà không cần xây dựng tường minh
-        ma trận Hessian, nhờ phép vi phân tự động bậc hai.
+        trong đó $\mathbf{g} = \nabla \mathcal{L}(\symbfit{\theta}_0)$ là gradient và
+    $\mathbf{H}\mathbf{g} := \nabla^2 \mathcal{L}(\symbfit{\theta}_0)\,\nabla \mathcal{L}(\symbfit{\theta}_0)$
+    là tích Hessian--gradient, tức tích của ma trận Hessian với vector gradient.
+    Lưu ý rằng $\mathbf{Hg}$ được tính trực tiếp bằng vi phân tự động bậc hai
+    mà không cần xây dựng tường minh ma trận Hessian $\nabla^2\mathcal{L} \in \mathbb{R}^{d\times d}$
+    (chi tiết ở Mục~\ref{subsec:hg_compute}).
+    Tích $\mathbf{Hg}$ có thể tính hiệu quả mà không cần xây dựng tường minh
+    ma trận Hessian, nhờ phép vi phân tự động bậc hai.
 
-        \paragraph{Điểm quan trọng của từng trọng số.}
+        \paragraph{\textbf{Điểm quan trọng của từng trọng số.}}
         Thay $\symbfit{\delta} = -\symbfit{\theta}_0$ (tức là tỉa toàn bộ), mỗi thành phần
         của điểm quan trọng vector hóa được xác định bởi:
         \begin{equation}
