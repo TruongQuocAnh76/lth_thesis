@@ -1285,7 +1285,10 @@ class EarlyBirdExperiment:
             'final_test_acc': final_test_acc,
             'final_test_loss': final_test_loss,
             'channel_sparsities': {k: float(1 - m.mean()) for k, m in channel_mask.items()},
-            'layer_sparsities': _compute_layer_sparsities_from_masks(weight_mask),
+            'layer_sparsities': _compute_layer_sparsities_from_masks(
+                weight_mask,
+                expected_layer_names=list(get_prunable_layers(model).keys()),
+            ),
         }
         
         efficiency_metrics = compute_efficiency_metrics(
@@ -3284,8 +3287,13 @@ def _to_numpy_masks(mask_payload: Dict[str, Any]) -> Dict[str, np.ndarray]:
 
 def _compute_layer_sparsities_from_masks(
     masks: Dict[str, Any],
+    expected_layer_names: Optional[List[str]] = None,
 ) -> Dict[str, float]:
-    """Compute per-layer sparsity values from binary mask tensors/arrays."""
+    """Compute per-layer sparsity values from binary mask tensors/arrays.
+
+    Optionally fill layers missing from `masks` (e.g., Early-Bird unpruned
+    linear heads) with 0.0 sparsity to keep result schemas plot-friendly.
+    """
     layer_sparsities: Dict[str, float] = {}
     for name, mask in masks.items():
         mask_array = mask
@@ -3298,7 +3306,38 @@ def _compute_layer_sparsities_from_masks(
             continue
 
         layer_sparsities[name] = float(1.0 - mask_array.mean())
+
+    if expected_layer_names:
+        for layer_name in expected_layer_names:
+            if layer_name in layer_sparsities:
+                continue
+
+            # Backward-compatibility for legacy mask payloads keyed by
+            # parameter names like `fc.weight`.
+            legacy_weight_key = f"{layer_name}.weight"
+            if legacy_weight_key in layer_sparsities:
+                continue
+
+            layer_sparsities[layer_name] = 0.0
+
     return layer_sparsities
+
+
+def _resolve_expected_prunable_layer_names(
+    *,
+    model_name: str,
+    num_classes: int,
+) -> List[str]:
+    """Return prunable module names (Conv2d/Linear) for an architecture."""
+    try:
+        model = get_model(model_name, num_classes=num_classes)
+        return list(get_prunable_layers(model).keys())
+    except Exception as exc:
+        print(
+            "[recompute_metrics] WARNING: Could not resolve expected layer names "
+            f"for {model_name}: {exc}"
+        )
+        return []
 
 
 def _resolve_num_classes(
@@ -3370,7 +3409,14 @@ def recompute_efficiency_metrics_for_existing_run(
     if not isinstance(masks_payload, dict):
         raise ValueError(f"Unexpected mask payload format at {final_masks_path}")
     masks_np = _to_numpy_masks(masks_payload)
-    layer_sparsities = _compute_layer_sparsities_from_masks(masks_np)
+    expected_layer_names = _resolve_expected_prunable_layer_names(
+        model_name=model_name,
+        num_classes=num_classes,
+    )
+    layer_sparsities = _compute_layer_sparsities_from_masks(
+        masks_np,
+        expected_layer_names=expected_layer_names,
+    )
 
 
     # Canonical metrics from RESULTS_FORMAT.md

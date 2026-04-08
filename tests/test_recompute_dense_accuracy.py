@@ -130,3 +130,37 @@ def test_recompute_metrics_leaves_dense_test_accuracy_null_without_initial_model
     assert result["final_results"]["dense_test_accuracy"] is None
     saved = json.loads((run_dir / "results.json").read_text())
     assert saved["final_results"]["dense_test_accuracy"] is None
+
+
+def test_recompute_metrics_adds_missing_linear_layer_sparsity(tmp_path, stubbed_experiment_api):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    results = {
+        "config": {
+            "model_name": "tiny",
+            "dataset_name": "cifar10",
+            "num_classes": 10,
+            "batch_size": 4,
+        },
+        "final_results": {
+            "total_time_seconds": 1.0,
+        },
+    }
+    (run_dir / "results.json").write_text(json.dumps(results, indent=2))
+
+    model = TinyClassifier(num_classes=10)
+    torch.save(model.state_dict(), run_dir / "final_model.pt")
+    # Mask payload intentionally omits the linear layer.
+    torch.save({"dummy": torch.ones(1)}, run_dir / "final_masks.pt")
+
+    result = recompute_efficiency_metrics_for_existing_run(
+        result_dir=str(run_dir),
+        device="cpu",
+    )
+
+    layer_sparsities = result["final_results"].get("layer_sparsities", {})
+    assert layer_sparsities.get("fc") == pytest.approx(0.0)
+
+    saved = json.loads((run_dir / "results.json").read_text())
+    assert saved["final_results"]["layer_sparsities"].get("fc") == pytest.approx(0.0)
