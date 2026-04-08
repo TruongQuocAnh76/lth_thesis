@@ -1284,7 +1284,8 @@ class EarlyBirdExperiment:
             'test_accs': finetune_results['test_accs'],
             'final_test_acc': final_test_acc,
             'final_test_loss': final_test_loss,
-            'channel_sparsities': {k: float(1 - m.mean()) for k, m in channel_mask.items()}
+            'channel_sparsities': {k: float(1 - m.mean()) for k, m in channel_mask.items()},
+            'layer_sparsities': _compute_layer_sparsities_from_masks(weight_mask),
         }
         
         efficiency_metrics = compute_efficiency_metrics(
@@ -3281,6 +3282,25 @@ def _to_numpy_masks(mask_payload: Dict[str, Any]) -> Dict[str, np.ndarray]:
     return masks_np
 
 
+def _compute_layer_sparsities_from_masks(
+    masks: Dict[str, Any],
+) -> Dict[str, float]:
+    """Compute per-layer sparsity values from binary mask tensors/arrays."""
+    layer_sparsities: Dict[str, float] = {}
+    for name, mask in masks.items():
+        mask_array = mask
+        if isinstance(mask_array, torch.Tensor):
+            mask_array = mask_array.detach().cpu().numpy()
+        elif not isinstance(mask_array, np.ndarray):
+            mask_array = np.asarray(mask_array)
+
+        if mask_array.size == 0:
+            continue
+
+        layer_sparsities[name] = float(1.0 - mask_array.mean())
+    return layer_sparsities
+
+
 def _resolve_num_classes(
     dataset_name: str,
     config: Dict[str, Any],
@@ -3350,6 +3370,7 @@ def recompute_efficiency_metrics_for_existing_run(
     if not isinstance(masks_payload, dict):
         raise ValueError(f"Unexpected mask payload format at {final_masks_path}")
     masks_np = _to_numpy_masks(masks_payload)
+    layer_sparsities = _compute_layer_sparsities_from_masks(masks_np)
 
 
     # Canonical metrics from RESULTS_FORMAT.md
@@ -3418,6 +3439,13 @@ def recompute_efficiency_metrics_for_existing_run(
     if final_results.get("dense_test_accuracy") is None:
         print("[recompute_metrics] WARNING: dense_test_accuracy remains unavailable")
 
+    final_results["layer_sparsities"] = layer_sparsities
+
+    finetune_phase = results.get("finetune_phase")
+    if isinstance(finetune_phase, dict):
+        finetune_phase["layer_sparsities"] = layer_sparsities
+        results["finetune_phase"] = finetune_phase
+
     results["final_results"] = _ensure_efficiency_metric_keys(final_results)
 
     backup_path = run_dir / f"results_before_metrics_recompute_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
@@ -3434,6 +3462,10 @@ def recompute_efficiency_metrics_for_existing_run(
     print("\n[recompute_metrics] Final canonical metrics:")
     for key in canonical_keys:
         print(f"  {key}: {results['final_results'].get(key)}")
+
+    print("\n[recompute_metrics] Recomputed layer_sparsities:")
+    for layer_name in sorted(layer_sparsities.keys()):
+        print(f"  {layer_name}: {layer_sparsities[layer_name]}")
 
     return {
         "run_dir": str(run_dir),

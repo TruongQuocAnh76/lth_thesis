@@ -90,9 +90,13 @@ def test_recompute_metrics_backfills_dense_test_accuracy(dense_artifact_run, stu
 
     final_results = result["final_results"]
     assert final_results["dense_test_accuracy"] == pytest.approx(100.0)
+    assert "layer_sparsities" in final_results
+    assert final_results["layer_sparsities"]["fc.weight"] == pytest.approx(0.0)
 
     saved = json.loads((dense_artifact_run / "results.json").read_text())
     assert saved["final_results"]["dense_test_accuracy"] == pytest.approx(100.0)
+    assert "layer_sparsities" in saved["final_results"]
+    assert saved["final_results"]["layer_sparsities"]["fc.weight"] == pytest.approx(0.0)
     backups = list(dense_artifact_run.glob("results_before_metrics_recompute_*.json"))
     assert backups, "Expected a timestamped backup of the original results.json"
 

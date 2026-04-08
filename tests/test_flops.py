@@ -22,7 +22,26 @@ def test_imp_flops():
 
 def test_earlybird_flops():
     from src.experiments import run_earlybird_experiment
-    _run_and_check_flops(run_earlybird_experiment, model_name="resnet20", dataset_name="moons", target_sparsity=0.5, search_epochs=1, finetune_epochs=1, l1_coef=1e-4, seed=42, device="cpu", save_dir="/tmp")
+    results = run_earlybird_experiment(
+        model_name="resnet20",
+        dataset_name="moons",
+        target_sparsity=0.5,
+        search_epochs=1,
+        finetune_epochs=1,
+        l1_coef=1e-4,
+        seed=42,
+        device="cpu",
+        save_dir="/tmp",
+    )
+    final = results.get('final_results', {})
+    assert final.get('dense_flops') is not None, "dense_flops is None for run_earlybird_experiment"
+    assert final.get('pruned_flops') is not None, "pruned_flops is None for run_earlybird_experiment"
+    assert final.get('flops_reduction') is not None, "flops_reduction is None for run_earlybird_experiment"
+
+    finetune_phase = results.get("finetune_phase", {})
+    assert "channel_sparsities" in finetune_phase
+    assert "layer_sparsities" in finetune_phase
+    assert finetune_phase["layer_sparsities"], "Expected non-empty layer_sparsities"
 
 def test_grasp_flops():
     from src.experiments import run_grasp_experiment
