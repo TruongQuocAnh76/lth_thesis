@@ -29,12 +29,15 @@ from src.earlybird import (
     compute_channel_mask_from_bn_gamma,
     compute_channel_mask_hamming_distance,
     EarlyBirdFinder,
+    align_channel_mask_for_residual_blocks,
     expand_channel_mask_to_conv_weights,
     add_l1_regularization_to_bn,
     get_channel_sparsity,
     get_overall_channel_sparsity,
     early_bird_search_offline,
 )
+from src.model import resnet20
+from src.util import apply_masks_to_model, create_mask_apply_fn
 
 
 # helpers to build simple models
@@ -159,6 +162,86 @@ def test_expand_channel_mask_to_conv_weights_prefers_nearest_conv():
     wm = expand_channel_mask_to_conv_weights(ch_mask, model)
     # should map to convB (the nearest preceding conv with matching channels)
     assert 'convB' in wm and 'convA' not in wm
+
+
+def test_align_channel_mask_for_residual_blocks_uses_authority_bn():
+    model = resnet20(num_classes=10)
+    channel_mask = {
+        'layer2.0.bn1': np.concatenate([np.zeros(8), np.ones(24)]).astype(np.float32),
+        'layer2.0.bn2': np.concatenate([np.ones(8), np.zeros(24)]).astype(np.float32),
+        'layer2.0.shortcut.1': np.concatenate([np.zeros(16), np.ones(16)]).astype(np.float32),
+    }
+
+    aligned = align_channel_mask_for_residual_blocks(channel_mask, model)
+    np.testing.assert_allclose(aligned['layer2.0.bn1'], channel_mask['layer2.0.bn2'])
+    np.testing.assert_allclose(aligned['layer2.0.bn2'], channel_mask['layer2.0.bn2'])
+    np.testing.assert_allclose(aligned['layer2.0.shortcut.1'], channel_mask['layer2.0.bn2'])
+
+
+def test_expand_channel_mask_to_conv_weights_resnet_block_alignment():
+    model = resnet20(num_classes=10)
+    authority_mask = np.concatenate([np.ones(8), np.zeros(24)]).astype(np.float32)
+    channel_mask = {
+        'layer2.0.bn2': authority_mask,
+        # Contradictory masks should be ignored once aligned.
+        'layer2.0.bn1': np.concatenate([np.zeros(8), np.ones(24)]).astype(np.float32),
+        'layer2.0.shortcut.1': np.concatenate([np.zeros(16), np.ones(16)]).astype(np.float32),
+    }
+
+    aligned = align_channel_mask_for_residual_blocks(channel_mask, model)
+    wm = expand_channel_mask_to_conv_weights(aligned, model)
+
+    for conv_name in ('layer2.0.conv1', 'layer2.0.conv2', 'layer2.0.shortcut.0'):
+        assert conv_name in wm
+        per_out = (wm[conv_name].reshape(authority_mask.shape[0], -1).sum(axis=1) > 0).astype(np.float32)
+        np.testing.assert_allclose(per_out, authority_mask)
+
+
+def test_apply_masks_to_model_masks_bn_affine_params():
+    from collections import OrderedDict
+
+    model = nn.Sequential(OrderedDict([
+        ('conv1', nn.Conv2d(3, 4, 3, padding=1, bias=False)),
+        ('bn1', nn.BatchNorm2d(4)),
+    ]))
+    model.conv1.weight.data.fill_(1.0)
+    model.bn1.weight.data.fill_(1.0)
+    model.bn1.bias.data.fill_(1.0)
+
+    weight_mask = {'conv1': np.array([[[[1.0]]], [[[0.0]]], [[[1.0]]], [[[0.0]]]], dtype=np.float32)}
+    weight_mask['conv1'] = np.broadcast_to(weight_mask['conv1'], model.conv1.weight.shape).astype(np.float32)
+    channel_mask = {'bn1': np.array([1.0, 0.0, 1.0, 0.0], dtype=np.float32)}
+
+    apply_masks_to_model(model, weight_mask, channel_mask=channel_mask)
+
+    conv_per_out = (model.conv1.weight.data.reshape(4, -1).sum(dim=1) > 0).to(torch.float32).cpu().numpy()
+    np.testing.assert_allclose(conv_per_out, channel_mask['bn1'])
+    np.testing.assert_allclose(model.bn1.weight.data.cpu().numpy(), channel_mask['bn1'])
+    np.testing.assert_allclose(model.bn1.bias.data.cpu().numpy(), channel_mask['bn1'])
+
+
+def test_create_mask_apply_fn_reapplies_bn_mask_after_update():
+    from collections import OrderedDict
+
+    model = nn.Sequential(OrderedDict([
+        ('conv1', nn.Conv2d(3, 4, 3, padding=1, bias=False)),
+        ('bn1', nn.BatchNorm2d(4)),
+    ]))
+    model.conv1.weight.data.fill_(1.0)
+    model.bn1.weight.data.fill_(1.0)
+    model.bn1.bias.data.fill_(1.0)
+
+    weight_mask = {'conv1': np.ones_like(model.conv1.weight.data.cpu().numpy(), dtype=np.float32)}
+    channel_mask = {'bn1': np.array([1.0, 0.0, 1.0, 0.0], dtype=np.float32)}
+    apply_fn = create_mask_apply_fn(model, channel_mask=channel_mask)
+
+    # Simulate optimizer restoring pruned BN channels.
+    model.bn1.weight.data[1] = 3.0
+    model.bn1.bias.data[3] = 2.0
+    apply_fn(weight_mask)
+
+    np.testing.assert_allclose(model.bn1.weight.data.cpu().numpy(), np.array([1.0, 0.0, 1.0, 0.0], dtype=np.float32))
+    np.testing.assert_allclose(model.bn1.bias.data.cpu().numpy(), np.array([1.0, 0.0, 1.0, 0.0], dtype=np.float32))
 
 # ---------- Test 8: add_l1_regularization_to_bn returns correct scalar on device ----------
 def test_add_l1_regularization_to_bn_value_and_device():

@@ -1,0 +1,472 @@
+{
+  "config": {
+    "algorithm": "hybrid",
+    "model_name": "resnet20",
+    "dataset_name": "moons",
+    "num_classes": 2,
+    "target_sparsity": 0.5,
+    "oneshot_ratio": 0.7,
+    "iterative_step": 0.1,
+    "initial_epochs": 1,
+    "initial_lr": 0.01,
+    "oneshot_finetune_max_epochs": 1,
+    "oneshot_finetune_patience": 50,
+    "iter_finetune_max_epochs": 1,
+    "iter_finetune_patience": 10,
+    "oneshot_scheduler_type": "cosine",
+    "iter_scheduler_type": "none",
+    "batch_size": 128,
+    "momentum": 0.9,
+    "weight_decay": 0.0005,
+    "use_global_pruning": true,
+    "seed": 42,
+    "pruning_steps": [
+      0.35,
+      0.1,
+      0.1,
+      0.050332383665717004
+    ],
+    "num_pruning_phases": 4
+  },
+  "phases": [
+    {
+      "step": 0,
+      "label": "one-shot",
+      "prune_ratio": 0.35,
+      "sparsity_after_prune": 0.3500022190662169,
+      "finetune_epochs_run": 1,
+      "finetune_max_epochs": 1,
+      "finetune_patience": 1,
+      "scheduler_type": "cosine",
+      "best_test_acc": 50.0,
+      "final_test_acc": 50.0,
+      "train_losses": [
+        0.654253363609314
+      ],
+      "train_accs": [
+        50.0
+      ],
+      "test_losses": [
+        0.6940158605575562
+      ],
+      "test_accs": [
+        50.0
+      ],
+      "layer_sparsities": {
+        "conv1": 0.046296296296296294,
+        "layer1.0.conv1": 0.2105034722222222,
+        "layer1.0.conv2": 0.18098958333333334,
+        "layer1.1.conv1": 0.1974826388888889,
+        "layer1.1.conv2": 0.20052083333333334,
+        "layer1.2.conv1": 0.19661458333333334,
+        "layer1.2.conv2": 0.1909722222222222,
+        "layer2.0.conv1": 0.19422743055555555,
+        "layer2.0.conv2": 0.2746310763888889,
+        "layer2.0.shortcut.0": 0.0546875,
+        "layer2.1.conv1": 0.2791883680555556,
+        "layer2.1.conv2": 0.2765842013888889,
+        "layer2.2.conv1": 0.2868923611111111,
+        "layer2.2.conv2": 0.2800564236111111,
+        "layer3.0.conv1": 0.2841254340277778,
+        "layer3.0.conv2": 0.3945855034722222,
+        "layer3.0.shortcut.0": 0.09033203125,
+        "layer3.1.conv1": 0.3949652777777778,
+        "layer3.1.conv2": 0.3957248263888889,
+        "layer3.2.conv1": 0.3946397569444444,
+        "layer3.2.conv2": 0.3914659288194444,
+        "linear": 0.0546875
+      }
+    },
+    {
+      "step": 1,
+      "label": "iter-1",
+      "prune_ratio": 0.1,
+      "sparsity_after_prune": 0.4150060654476596,
+      "finetune_epochs_run": 1,
+      "finetune_max_epochs": 1,
+      "finetune_patience": 1,
+      "scheduler_type": "none",
+      "best_test_acc": 50.0,
+      "final_test_acc": 50.0,
+      "train_losses": [
+        0.6628659963607788
+      ],
+      "train_accs": [
+        50.0
+      ],
+      "test_losses": [
+        0.6942852139472961
+      ],
+      "test_accs": [
+        50.0
+      ],
+      "layer_sparsities": {
+        "conv1": 0.06018518518518518,
+        "layer1.0.conv1": 0.24479166666666666,
+        "layer1.0.conv2": 0.2165798611111111,
+        "layer1.1.conv1": 0.23828125,
+        "layer1.1.conv2": 0.23524305555555555,
+        "layer1.2.conv1": 0.23524305555555555,
+        "layer1.2.conv2": 0.2361111111111111,
+        "layer2.0.conv1": 0.2322048611111111,
+        "layer2.0.conv2": 0.3323567708333333,
+        "layer2.0.shortcut.0": 0.072265625,
+        "layer2.1.conv1": 0.3289930555555556,
+        "layer2.1.conv2": 0.3282335069444444,
+        "layer2.2.conv1": 0.3338758680555556,
+        "layer2.2.conv2": 0.3306206597222222,
+        "layer3.0.conv1": 0.3372938368055556,
+        "layer3.0.conv2": 0.4669867621527778,
+        "layer3.0.shortcut.0": 0.1044921875,
+        "layer3.1.conv1": 0.4673122829861111,
+        "layer3.1.conv2": 0.4695366753472222,
+        "layer3.2.conv1": 0.4662814670138889,
+        "layer3.2.conv2": 0.4669867621527778,
+        "linear": 0.0625
+      }
+    },
+    {
+      "step": 2,
+      "label": "iter-2",
+      "prune_ratio": 0.1,
+      "sparsity_after_prune": 0.4735080478134801,
+      "finetune_epochs_run": 1,
+      "finetune_max_epochs": 1,
+      "finetune_patience": 1,
+      "scheduler_type": "none",
+      "best_test_acc": 50.0,
+      "final_test_acc": 50.0,
+      "train_losses": [
+        0.6980656385421753
+      ],
+      "train_accs": [
+        50.0
+      ],
+      "test_losses": [
+        0.6944057941436768
+      ],
+      "test_accs": [
+        50.0
+      ],
+      "layer_sparsities": {
+        "conv1": 0.07407407407407407,
+        "layer1.0.conv1": 0.2760416666666667,
+        "layer1.0.conv2": 0.2478298611111111,
+        "layer1.1.conv1": 0.2712673611111111,
+        "layer1.1.conv2": 0.2734375,
+        "layer1.2.conv1": 0.2647569444444444,
+        "layer1.2.conv2": 0.2699652777777778,
+        "layer2.0.conv1": 0.2632378472222222,
+        "layer2.0.conv2": 0.3785807291666667,
+        "layer2.0.shortcut.0": 0.08203125,
+        "layer2.1.conv1": 0.3796657986111111,
+        "layer2.1.conv2": 0.3754340277777778,
+        "layer2.2.conv1": 0.3807508680555556,
+        "layer2.2.conv2": 0.3778211805555556,
+        "layer3.0.conv1": 0.3828125,
+        "layer3.0.conv2": 0.5339898003472222,
+        "layer3.0.shortcut.0": 0.11865234375,
+        "layer3.1.conv1": 0.530517578125,
+        "layer3.1.conv2": 0.5358344184027778,
+        "layer3.2.conv1": 0.5322808159722222,
+        "layer3.2.conv2": 0.5338541666666666,
+        "linear": 0.1015625
+      }
+    },
+    {
+      "step": 3,
+      "label": "iter-3",
+      "prune_ratio": 0.050332383665717004,
+      "sparsity_after_prune": 0.5000110953310847,
+      "finetune_epochs_run": 1,
+      "finetune_max_epochs": 1,
+      "finetune_patience": 1,
+      "scheduler_type": "none",
+      "best_test_acc": 50.0,
+      "final_test_acc": 50.0,
+      "train_losses": [
+        0.6880975365638733
+      ],
+      "train_accs": [
+        50.0
+      ],
+      "test_losses": [
+        0.6944867968559265
+      ],
+      "test_accs": [
+        50.0
+      ],
+      "layer_sparsities": {
+        "conv1": 0.0763888888888889,
+        "layer1.0.conv1": 0.2925347222222222,
+        "layer1.0.conv2": 0.2651909722222222,
+        "layer1.1.conv1": 0.2873263888888889,
+        "layer1.1.conv2": 0.2860243055555556,
+        "layer1.2.conv1": 0.2808159722222222,
+        "layer1.2.conv2": 0.2864583333333333,
+        "layer2.0.conv1": 0.2769097222222222,
+        "layer2.0.conv2": 0.3995225694444444,
+        "layer2.0.shortcut.0": 0.087890625,
+        "layer2.1.conv1": 0.3984375,
+        "layer2.1.conv2": 0.3956163194444444,
+        "layer2.2.conv1": 0.4004991319444444,
+        "layer2.2.conv2": 0.3996310763888889,
+        "layer3.0.conv1": 0.4027777777777778,
+        "layer3.0.conv2": 0.5637478298611112,
+        "layer3.0.shortcut.0": 0.12744140625,
+        "layer3.1.conv1": 0.5614963107638888,
+        "layer3.1.conv2": 0.5670030381944444,
+        "layer3.2.conv1": 0.5619032118055556,
+        "layer3.2.conv2": 0.5631239149305556,
+        "linear": 0.1015625
+      }
+    }
+  ],
+  "initial_training": {
+    "train_losses": [
+      0.7049051523208618
+    ],
+    "train_accs": [
+      50.0
+    ],
+    "test_losses": [
+      0.6937772631645203
+    ],
+    "test_accs": [
+      50.0
+    ],
+    "final_test_acc": 50.0
+  },
+  "final_results": {
+    "final_sparsity": 0.5000110953310847,
+    "overall_sparsity": 0.5000110953310847,
+    "final_test_accuracy": 50.0,
+    "final_train_accuracy": 50.0,
+    "best_phase_test_accuracy": 50.0,
+    "initial_test_accuracy": 50.0,
+    "total_time_seconds": 2.4027509689331055,
+    "training_computational_cost_seconds": 2.4027509689331055,
+    "stopped_early": false,
+    "flops_reduction": 1.6596311414959128,
+    "dense_flops": 81625346.0,
+    "pruned_flops": 49182823.796875,
+    "dense_latency_ms": 3.1028341666872925,
+    "pruned_latency_ms": 6.422832533341231,
+    "dense_throughput": 322.28599605361416,
+    "pruned_throughput": 155.69454672980373,
+    "flops_backend": "internal_mask_aware_estimator",
+    "flops_note": "Counts Conv2d/Linear FLOPs. Pruned FLOPs are estimated from mask density because zero-masked dense models do not change operator shapes.",
+    "dense_test_accuracy": null
+  },
+  "train_history": {
+    "initial_training": {
+      "train_losses": [
+        0.7049051523208618
+      ],
+      "train_accs": [
+        50.0
+      ],
+      "test_losses": [
+        0.6937772631645203
+      ],
+      "test_accs": [
+        50.0
+      ],
+      "final_test_acc": 50.0
+    },
+    "phases": [
+      {
+        "step": 0,
+        "label": "one-shot",
+        "prune_ratio": 0.35,
+        "sparsity_after_prune": 0.3500022190662169,
+        "finetune_epochs_run": 1,
+        "finetune_max_epochs": 1,
+        "finetune_patience": 1,
+        "scheduler_type": "cosine",
+        "best_test_acc": 50.0,
+        "final_test_acc": 50.0,
+        "train_losses": [
+          0.654253363609314
+        ],
+        "train_accs": [
+          50.0
+        ],
+        "test_losses": [
+          0.6940158605575562
+        ],
+        "test_accs": [
+          50.0
+        ],
+        "layer_sparsities": {
+          "conv1": 0.046296296296296294,
+          "layer1.0.conv1": 0.2105034722222222,
+          "layer1.0.conv2": 0.18098958333333334,
+          "layer1.1.conv1": 0.1974826388888889,
+          "layer1.1.conv2": 0.20052083333333334,
+          "layer1.2.conv1": 0.19661458333333334,
+          "layer1.2.conv2": 0.1909722222222222,
+          "layer2.0.conv1": 0.19422743055555555,
+          "layer2.0.conv2": 0.2746310763888889,
+          "layer2.0.shortcut.0": 0.0546875,
+          "layer2.1.conv1": 0.2791883680555556,
+          "layer2.1.conv2": 0.2765842013888889,
+          "layer2.2.conv1": 0.2868923611111111,
+          "layer2.2.conv2": 0.2800564236111111,
+          "layer3.0.conv1": 0.2841254340277778,
+          "layer3.0.conv2": 0.3945855034722222,
+          "layer3.0.shortcut.0": 0.09033203125,
+          "layer3.1.conv1": 0.3949652777777778,
+          "layer3.1.conv2": 0.3957248263888889,
+          "layer3.2.conv1": 0.3946397569444444,
+          "layer3.2.conv2": 0.3914659288194444,
+          "linear": 0.0546875
+        }
+      },
+      {
+        "step": 1,
+        "label": "iter-1",
+        "prune_ratio": 0.1,
+        "sparsity_after_prune": 0.4150060654476596,
+        "finetune_epochs_run": 1,
+        "finetune_max_epochs": 1,
+        "finetune_patience": 1,
+        "scheduler_type": "none",
+        "best_test_acc": 50.0,
+        "final_test_acc": 50.0,
+        "train_losses": [
+          0.6628659963607788
+        ],
+        "train_accs": [
+          50.0
+        ],
+        "test_losses": [
+          0.6942852139472961
+        ],
+        "test_accs": [
+          50.0
+        ],
+        "layer_sparsities": {
+          "conv1": 0.06018518518518518,
+          "layer1.0.conv1": 0.24479166666666666,
+          "layer1.0.conv2": 0.2165798611111111,
+          "layer1.1.conv1": 0.23828125,
+          "layer1.1.conv2": 0.23524305555555555,
+          "layer1.2.conv1": 0.23524305555555555,
+          "layer1.2.conv2": 0.2361111111111111,
+          "layer2.0.conv1": 0.2322048611111111,
+          "layer2.0.conv2": 0.3323567708333333,
+          "layer2.0.shortcut.0": 0.072265625,
+          "layer2.1.conv1": 0.3289930555555556,
+          "layer2.1.conv2": 0.3282335069444444,
+          "layer2.2.conv1": 0.3338758680555556,
+          "layer2.2.conv2": 0.3306206597222222,
+          "layer3.0.conv1": 0.3372938368055556,
+          "layer3.0.conv2": 0.4669867621527778,
+          "layer3.0.shortcut.0": 0.1044921875,
+          "layer3.1.conv1": 0.4673122829861111,
+          "layer3.1.conv2": 0.4695366753472222,
+          "layer3.2.conv1": 0.4662814670138889,
+          "layer3.2.conv2": 0.4669867621527778,
+          "linear": 0.0625
+        }
+      },
+      {
+        "step": 2,
+        "label": "iter-2",
+        "prune_ratio": 0.1,
+        "sparsity_after_prune": 0.4735080478134801,
+        "finetune_epochs_run": 1,
+        "finetune_max_epochs": 1,
+        "finetune_patience": 1,
+        "scheduler_type": "none",
+        "best_test_acc": 50.0,
+        "final_test_acc": 50.0,
+        "train_losses": [
+          0.6980656385421753
+        ],
+        "train_accs": [
+          50.0
+        ],
+        "test_losses": [
+          0.6944057941436768
+        ],
+        "test_accs": [
+          50.0
+        ],
+        "layer_sparsities": {
+          "conv1": 0.07407407407407407,
+          "layer1.0.conv1": 0.2760416666666667,
+          "layer1.0.conv2": 0.2478298611111111,
+          "layer1.1.conv1": 0.2712673611111111,
+          "layer1.1.conv2": 0.2734375,
+          "layer1.2.conv1": 0.2647569444444444,
+          "layer1.2.conv2": 0.2699652777777778,
+          "layer2.0.conv1": 0.2632378472222222,
+          "layer2.0.conv2": 0.3785807291666667,
+          "layer2.0.shortcut.0": 0.08203125,
+          "layer2.1.conv1": 0.3796657986111111,
+          "layer2.1.conv2": 0.3754340277777778,
+          "layer2.2.conv1": 0.3807508680555556,
+          "layer2.2.conv2": 0.3778211805555556,
+          "layer3.0.conv1": 0.3828125,
+          "layer3.0.conv2": 0.5339898003472222,
+          "layer3.0.shortcut.0": 0.11865234375,
+          "layer3.1.conv1": 0.530517578125,
+          "layer3.1.conv2": 0.5358344184027778,
+          "layer3.2.conv1": 0.5322808159722222,
+          "layer3.2.conv2": 0.5338541666666666,
+          "linear": 0.1015625
+        }
+      },
+      {
+        "step": 3,
+        "label": "iter-3",
+        "prune_ratio": 0.050332383665717004,
+        "sparsity_after_prune": 0.5000110953310847,
+        "finetune_epochs_run": 1,
+        "finetune_max_epochs": 1,
+        "finetune_patience": 1,
+        "scheduler_type": "none",
+        "best_test_acc": 50.0,
+        "final_test_acc": 50.0,
+        "train_losses": [
+          0.6880975365638733
+        ],
+        "train_accs": [
+          50.0
+        ],
+        "test_losses": [
+          0.6944867968559265
+        ],
+        "test_accs": [
+          50.0
+        ],
+        "layer_sparsities": {
+          "conv1": 0.0763888888888889,
+          "layer1.0.conv1": 0.2925347222222222,
+          "layer1.0.conv2": 0.2651909722222222,
+          "layer1.1.conv1": 0.2873263888888889,
+          "layer1.1.conv2": 0.2860243055555556,
+          "layer1.2.conv1": 0.2808159722222222,
+          "layer1.2.conv2": 0.2864583333333333,
+          "layer2.0.conv1": 0.2769097222222222,
+          "layer2.0.conv2": 0.3995225694444444,
+          "layer2.0.shortcut.0": 0.087890625,
+          "layer2.1.conv1": 0.3984375,
+          "layer2.1.conv2": 0.3956163194444444,
+          "layer2.2.conv1": 0.4004991319444444,
+          "layer2.2.conv2": 0.3996310763888889,
+          "layer3.0.conv1": 0.4027777777777778,
+          "layer3.0.conv2": 0.5637478298611112,
+          "layer3.0.shortcut.0": 0.12744140625,
+          "layer3.1.conv1": 0.5614963107638888,
+          "layer3.1.conv2": 0.5670030381944444,
+          "layer3.2.conv1": 0.5619032118055556,
+          "layer3.2.conv2": 0.5631239149305556,
+          "linear": 0.1015625
+        }
+      }
+    ]
+  }
+}

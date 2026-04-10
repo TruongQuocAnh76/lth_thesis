@@ -41,6 +41,7 @@ from src.earlybird import (
     EarlyBirdFinder,
     extract_bn_gammas,
     compute_channel_mask_from_bn_gamma,
+    align_channel_mask_for_residual_blocks,
     expand_channel_mask_to_conv_weights,
     add_l1_regularization_to_bn,
     get_bn_layer_count,
@@ -1205,6 +1206,9 @@ class EarlyBirdExperiment:
                 bn_gammas, self.target_sparsity, self.pruning_method
             )
         
+        # Keep residual blocks channel-consistent before generating Conv masks.
+        channel_mask = align_channel_mask_for_residual_blocks(channel_mask, model)
+
         # Convert channel mask to Conv weight mask
         weight_mask = expand_channel_mask_to_conv_weights(channel_mask, model)
         channel_sparsity = get_overall_channel_sparsity(channel_mask)
@@ -1244,12 +1248,12 @@ class EarlyBirdExperiment:
         
         # PHASE 2: Apply discovered channel mask to current weights (no re-init)
         # Paper: "EB Train inherits the unpruned weights from the drawn EB ticket"
-        apply_masks_to_model(model, weight_mask)
+        apply_masks_to_model(model, weight_mask, channel_mask=channel_mask)
         
         # Create fresh optimizer and scheduler for finetuning
         optimizer = self._create_optimizer(model)
         scheduler = self._create_scheduler(optimizer, self.finetune_epochs)
-        apply_mask_fn = create_mask_apply_fn(model)
+        apply_mask_fn = create_mask_apply_fn(model, channel_mask=channel_mask)
         
         # Train with the ticket (NO L1 regularization in finetune phase)
         print(f"Training for {self.finetune_epochs} epochs with discovered ticket...")

@@ -31,19 +31,61 @@ def get_prunable_layers(model: nn.Module) -> dict:
 	return weights
 
 
-def apply_masks_to_model(model: nn.Module, masks: dict):
-	"""Apply pruning masks to model weights in-place."""
+def apply_channel_mask_to_bn(model: nn.Module, channel_mask: Optional[Dict[str, np.ndarray]]):
+	"""Apply channel masks to BatchNorm affine parameters in-place.
+
+	Pruned channels keep gamma/beta at zero to prevent BatchNorm beta leakage
+	during finetuning updates.
+	"""
+	if not channel_mask:
+		return
+
 	for name, module in model.named_modules():
-		if name in masks:
-			mask_tensor = torch.from_numpy(masks[name]).to(module.weight.device)
-			module.weight.data *= mask_tensor.float()
+		if name not in channel_mask:
+			continue
+		if not isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+			continue
+
+		mask_tensor = torch.as_tensor(channel_mask[name], device=next(module.parameters()).device, dtype=torch.float32)
+		with torch.no_grad():
+			if module.weight is not None:
+				module.weight.data.mul_(mask_tensor)
+			if module.bias is not None:
+				module.bias.data.mul_(mask_tensor)
 
 
-def create_mask_apply_fn(model: nn.Module):
+def apply_masks_to_model(
+	model: nn.Module,
+	masks: dict,
+	channel_mask: Optional[Dict[str, np.ndarray]] = None,
+):
+	"""Apply pruning masks to model weights in-place.
+
+	Args:
+		model: Model to update.
+		masks: Weight masks keyed by module name.
+		channel_mask: Optional BN channel masks keyed by BN module name.
+	"""
+	for name, module in model.named_modules():
+		if name not in masks:
+			continue
+		if not hasattr(module, "weight") or module.weight is None:
+			continue
+		mask_tensor = torch.as_tensor(masks[name], device=module.weight.device, dtype=torch.float32)
+		with torch.no_grad():
+			module.weight.data.mul_(mask_tensor)
+
+	apply_channel_mask_to_bn(model, channel_mask)
+
+
+def create_mask_apply_fn(
+	model: nn.Module,
+	channel_mask: Optional[Dict[str, np.ndarray]] = None,
+):
 	"""Return a closure to reapply masks after each optimizer step."""
 
 	def apply_fn(masks: dict):
-		apply_masks_to_model(model, masks)
+		apply_masks_to_model(model, masks, channel_mask=channel_mask)
 
 	return apply_fn
 

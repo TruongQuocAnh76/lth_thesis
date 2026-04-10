@@ -471,6 +471,123 @@ def early_bird_search_offline(
     return ticket, stats['convergence_epoch'], stats['distance_history']
 
 
+def align_channel_mask_for_residual_blocks(
+    channel_mask: Dict[str, np.ndarray],
+    model: nn.Module
+) -> Dict[str, np.ndarray]:
+    """Align BN channel masks within residual blocks using authority BN masks.
+
+    For models that expose ``get_block_info`` (e.g., ResNet-20), we propagate
+    each block's authority mask (bn2) to bn1/bn2/shortcut BN so main and skip
+    paths use a consistent active-channel set before residual addition.
+    """
+    aligned = {k: np.asarray(v, dtype=np.float32).copy() for k, v in channel_mask.items()}
+
+    get_blocks = getattr(model, 'get_block_info', None)
+    if not callable(get_blocks):
+        return aligned
+
+    try:
+        blocks = get_blocks()
+    except Exception:
+        return aligned
+
+    for block in blocks:
+        authority_name = block.get('authority_bn')
+        if authority_name not in aligned:
+            continue
+
+        authority_mask = aligned[authority_name]
+        for bn_key in ('bn1', 'bn2', 'shortcut_bn'):
+            bn_name = block.get(bn_key)
+            if bn_name in aligned and aligned[bn_name].shape == authority_mask.shape:
+                aligned[bn_name] = authority_mask.copy()
+
+    return aligned
+
+
+def _get_module_by_name(model: nn.Module, module_name: str) -> Optional[nn.Module]:
+    """Return nested module by dotted name (supports sequential indices)."""
+    parts = module_name.split('.')
+    module: nn.Module = model
+
+    for part in parts:
+        if part.isdigit():
+            idx = int(part)
+            if not hasattr(module, '__getitem__'):
+                return None
+            module = module[idx]
+        else:
+            if not hasattr(module, part):
+                return None
+            module = getattr(module, part)
+
+    return module
+
+
+def _expand_channel_mask_with_block_info(
+    channel_mask: Dict[str, np.ndarray],
+    model: nn.Module
+) -> Tuple[Dict[str, np.ndarray], set]:
+    """Build Conv2d masks from residual block metadata.
+
+    Returns:
+        Tuple of (weight_masks, covered_bn_names).
+    """
+    weight_masks: Dict[str, np.ndarray] = {}
+    covered_bn_names = set()
+
+    get_blocks = getattr(model, 'get_block_info', None)
+    if not callable(get_blocks):
+        return weight_masks, covered_bn_names
+
+    try:
+        blocks = get_blocks()
+    except Exception:
+        return weight_masks, covered_bn_names
+
+    for block in blocks:
+        authority_bn_name = block.get('authority_bn')
+        if authority_bn_name not in channel_mask:
+            continue
+
+        block_mask = np.asarray(channel_mask[authority_bn_name], dtype=np.float32)
+        num_channels = len(block_mask)
+
+        for conv_key in ('conv1', 'conv2', 'shortcut_conv'):
+            conv_name = block.get(conv_key)
+            if not conv_name:
+                continue
+
+            conv_module = _get_module_by_name(model, conv_name)
+            if not isinstance(conv_module, nn.Conv2d):
+                continue
+            if conv_module.weight.shape[0] != num_channels:
+                continue
+
+            conv_mask = np.broadcast_to(
+                block_mask.reshape(-1, 1, 1, 1),
+                conv_module.weight.shape,
+            ).astype(np.float32)
+
+            # Preserve block-level channel consistency through conv2 input channels.
+            if conv_key == 'conv2' and conv_module.weight.shape[1] == num_channels:
+                input_mask = np.broadcast_to(
+                    block_mask.reshape(1, -1, 1, 1),
+                    conv_module.weight.shape,
+                ).astype(np.float32)
+                conv_mask = conv_mask * input_mask
+
+            weight_masks[conv_name] = conv_mask
+
+        for bn_key in ('bn1', 'bn2', 'shortcut_bn'):
+            bn_name = block.get(bn_key)
+            if bn_name in channel_mask:
+                covered_bn_names.add(bn_name)
+
+    return weight_masks, covered_bn_names
+
+
 def expand_channel_mask_to_conv_weights(
     channel_mask: Dict[str, np.ndarray],
     model: nn.Module
@@ -487,7 +604,8 @@ def expand_channel_mask_to_conv_weights(
     Returns:
         Dictionary of weight masks for Conv2d layers.
     """
-    weight_masks = {}
+    # First use architecture metadata when available (e.g., ResNet blocks).
+    weight_masks, covered_bn_names = _expand_channel_mask_with_block_info(channel_mask, model)
     
     # Build ordered list of all modules (preserve model traversal order)
     module_list = list(model.named_modules())
@@ -498,6 +616,9 @@ def expand_channel_mask_to_conv_weights(
             continue
         
         if bn_name not in channel_mask:
+            continue
+
+        if bn_name in covered_bn_names:
             continue
         
         num_channels = len(channel_mask[bn_name])
