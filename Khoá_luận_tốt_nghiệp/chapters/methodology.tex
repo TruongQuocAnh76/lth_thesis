@@ -362,6 +362,22 @@
         \end{algorithm}
 
         \subsection{Synflow}
+        Iterative Synaptic Flow Pruning (SynFlow) \cite{synflow} là một thuật
+        toán tỉa thưa tại thời điểm khởi tạo (\emph{pruning at initialization}) được
+        thiết kế xuất phát từ lý thuyết, không phụ thuộc vào dữ liệu huấn luyện.
+        Khác với các phương pháp tỉa thưa truyền thống như SNIP hay
+        GraSP -- vốn đòi hỏi một lần lan truyền thuận/ngược qua
+        tập huấn luyện để tính điểm tầm quan trọng -- SynFlow xác định mặt nạ thưa
+        (\emph{sparse mask}) chỉ dựa trên cấu trúc tham số của mạng tại khởi tạo.
+        Động lực lý thuyết cốt lõi của thuật toán là khái niệm \emph{sụp đổ tầng}
+        (\emph{layer-collapse}), tức hiện tượng một thuật toán tỉa thưa vô tình loại bỏ
+        toàn bộ tham số của một tầng, khiến mạng không còn khả năng lan truyền tín hiệu
+        và do đó không thể huấn luyện được. SynFlow được chứng minh là thuật toán đầu
+        tiên đảm bảo tránh hoàn toàn hiện tượng này, đạt \emph{Nén Tới Hạn Cực Đại}
+        (\emph{Maximal Critical Compression}) bằng cách lặp lại việc đánh giá điểm
+        dựa trên một hàm mất mát không sử dụng dữ liệu có cấu trúc bảo toàn dòng chảy
+        synapse qua mạng.
+
         Xét một mạng nơ-ron truyền thẳng (\emph{feedforward}) $f(\symbfit{x};\symbfit{\theta})$
         gồm $L$ tầng có trọng số. Ký hiệu $\symbfit{\theta} = \{\symbfit{\theta}^{[l]}\}_{l=1}^{L}$
         là tập hợp tất cả tham số có thể tỉa, trong đó $\symbfit{\theta}^{[l]} \in
@@ -369,7 +385,7 @@
         $N^{[l]} = |\symbfit{\theta}^{[l]}|$ là số lượng tham số tương ứng. Tổng số
         tham số của mạng là $N = \sum_{l=1}^{L} N^{[l]}$.
         
-        \begin{definition}[Tỉ lệ nén {\cite{synflow}}]
+        \begin{definition}[Tỉ lệ nén]
         Tỉ lệ nén $\rho \geq 1$ được định nghĩa là tỉ số giữa số tham số ban đầu và
         số tham số còn lại sau khi tỉa:
         \[
@@ -379,7 +395,7 @@
         $\rho_{\max} = N/L$, ứng với việc giữ lại đúng một tham số mỗi tầng.
         \end{definition}
         
-        \begin{definition}[Mặt nạ tỉa thưa {\cite{synflow}}]
+        \begin{definition}[Mặt nạ tỉa thưa]
         Mặt nạ nhị phân $\symbfit{\mu} = \{\symbfit{\mu}^{[l]}\}_{l=1}^{L}$,
         $\symbfit{\mu}^{[l]} \in \{0,1\}^{N^{[l]}}$, xác định tập tham số được giữ
         lại. Mạng sau khi tỉa được ký hiệu $f(\symbfit{x};\, \symbfit{\mu} \odot
@@ -387,7 +403,7 @@
         và $\odot$ là tích Hadamard.
         \end{definition}
         
-        \begin{definition}[Synaptic saliency {\cite{synflow}}]
+        \begin{definition}[Synaptic saliency]
         \label{def:saliency}
         Với hàm mục tiêu vô hướng $\mathcal{R}$ là hàm của đầu ra mạng, điểm
         \emph{synaptic saliency} của tham số $\theta_i$ được định nghĩa là
@@ -396,18 +412,15 @@
             \cdot \theta_i.
             \label{eq:saliency}
         \end{equation}
-        Đây là tích Hadamard giữa gradient của $\mathcal{R}$ và véc-tơ tham số,
-        tổng quát hóa nhiều tiêu chí điểm quan trọng kinh điển (Skeletonization,
-        SNIP, Taylor-FO, \dots).
         \end{definition}
         
-        \subsubsection{Định lý bảo toàn và hệ quả}
+        \subsubsection{\textbf{Định lý bảo toàn và hệ quả}}
         
         Nền tảng lý thuyết của SynFlow dựa trên hai định lý bảo toàn sau, chứng minh
         rằng tổng điểm synaptic saliency được bảo toàn qua từng nơ-ron và toàn mạng
         \cite{synflow}.
         
-        \begin{theorem}[Bảo toàn theo nơ-ron {\cite{synflow}}]
+        \begin{theorem}[Bảo toàn theo nơ-ron]
         \label{thm:neuron_conservation}
         Với mạng truyền thẳng có hàm kích hoạt liên tục và thuần nhất bậc nhất
         $\phi(x) = \phi'(x)\,x$ (ví dụ: ReLU, Leaky ReLU, tuyến tính), tổng điểm
@@ -423,7 +436,7 @@
         \]
         \end{theorem}
         
-        \begin{theorem}[Bảo toàn theo mạng {\cite{synflow}}]
+        \begin{theorem}[Bảo toàn theo mạng]
         \label{thm:network_conservation}
         Tổng điểm saliency trên bất kỳ tập tham số nào \emph{tách biệt hoàn toàn}
         các nơ-ron đầu vào $\symbfit{x}$ khỏi các nơ-ron đầu ra $\symbfit{y}$ đều
@@ -435,7 +448,7 @@
         \end{theorem}
         
         \noindent
-        \textbf{Hệ quả -- Nguyên nhân gây sụp đổ tầng \cite{synflow}.}\;
+        \textbf{Hệ quả -- Nguyên nhân gây sụp đổ tầng}\;
         Từ Định lý~\ref{thm:network_conservation}, tổng điểm saliency trên tầng $l$
         của một mạng fully-connected đơn giản là hằng số với mọi $l$. Do đó, điểm
         trung bình của tầng tỉ lệ nghịch với kích thước tầng:
@@ -446,7 +459,7 @@
         (\emph{single-shot}) như SNIP hay GraSP ưu tiên loại bỏ tham số của tầng
         \emph{lớn nhất}, dẫn đến sụp đổ tầng khi tỉ lệ nén đủ cao \cite{synflow}.
         
-        \subsubsection{Điểm Synaptic Flow và hàm mục tiêu SynFlow}
+        \subsubsection{\textbf{Điểm Synaptic Flow và hàm mục tiêu SynFlow}}
         \label{subsubsec:synflow_score}
         
         Để tránh sụp đổ tầng, SynFlow yêu cầu điểm tham số phải (i) \emph{dương},
@@ -480,7 +493,7 @@
         trọng số tuyệt đối dọc theo mọi đường đi từ đầu vào đến đầu ra mà đi qua
         $w^{[l]}_{ij}$, tổng quát hóa điểm độ lớn đơn thuần $|w^{[l]}_{ij}|$ bằng
         cách tính đến sự tương tác liên tầng \cite{synflow} 
-        \subsubsection{Điều kiện đủ để đạt Nén Tới Hạn Cực Đại}
+        \subsubsection{\textbf{Điều kiện đủ để đạt Nén Tới Hạn Cực Đại}}
         
         \begin{theorem}[Tỉa lặp với điểm dương và bảo toàn đạt Nén Tới Hạn Cực Đại]
         \label{thm:mcc}
@@ -498,7 +511,7 @@
         số vòng lặp tỉa.
 
         \begin{algorithm}[H]
-        \caption{Iterative Synaptic Flow Pruning -- SynFlow \cite{synflow}}
+        \caption{Iterative Synaptic Flow Pruning -- SynFlow}
         \label{alg:synflow}
         \DontPrintSemicolon
         \SetAlgoLined
@@ -576,7 +589,7 @@
             Mục tiêu là đạt được tỉ lệ thưa thớt mục tiêu $p \in (0,1)$, tức là
             $s(\symbfit{m}^*) = p$, đồng thời duy trì độ chính xác của mô hình ở mức cao nhất có thể.
 
-            \paragraph{Tiêu chí quan trọng theo độ lớn (magnitude criterion).}
+            \paragraph{\textbf{Tiêu chí quan trọng theo độ lớn (magnitude criterion).}}
             Tại mỗi bước cắt tỉa, tầm quan trọng của tham số $\theta_i$ được ước lượng bằng giá trị tuyệt đối của nó:
             \begin{equation}
                 \text{score}(\theta_i) \;=\; |\theta_i|.
@@ -584,7 +597,7 @@
             \end{equation}
             Các tham số có điểm số thấp nhất sẽ bị loại bỏ, tức là bị gán $m_i = 0$.
             
-            \paragraph{Bước cắt tỉa một lần lớn (one-shot step).}
+            \paragraph{\textbf{Bước cắt tỉa một lần lớn (one-shot step).}}
             Cho tỉ lệ cắt tỉa one-shot $p_k \in (0, p)$ với $p_k = \alpha \cdot p$, trong đó $\alpha \in [0.6,\, 0.8]$ là hệ số phân bổ.
             Mặt nạ sau bước one-shot được xác định bởi:
             
@@ -600,14 +613,14 @@
             trong đó $\tau_{p_k}$ là ngưỡng được chọn sao cho tỉ lệ thưa thớt sau bước này bằng đúng $p_k$, tức là $s(\symbfit{m}^{(0)}) = p_k$.
             Một cách tương đương, $\tau_{p_k}$ chính là phân vị thứ $p_k$ của phân phối $\{|\theta_i|\}_{i=1}^{W}$.
             
-            \paragraph{Số trọng số còn lại.}
+            \paragraph{\textbf{Số trọng số còn lại.}}
             Sau bước one-shot, số trọng số chưa bị cắt tỉa là:
             \begin{equation}
                 W^{(0)} \;=\; \|\symbfit{m}^{(0)}\|_0 \;=\; W\,(1 - p_k).
                 \label{eq:remaining-after-oneshot}
             \end{equation}
             
-            \paragraph{Lịch trình cắt tỉa hình học lặp lại (iterative geometric schedule).}
+            \paragraph{\textbf{Lịch trình cắt tỉa hình học lặp lại (iterative geometric schedule).}}
             Gọi $p_i \ll p_k$ là tỉ lệ cắt tỉa tại mỗi bước lặp, được áp dụng trên số trọng số \emph{còn lại} tại bước đó.
             Sau $n$ bước lặp hình học, số trọng số còn lại là:
             
@@ -630,7 +643,7 @@
             
             trong đó $\tau_{p_i}^{(n)}$ là ngưỡng phân vị thứ $p_i$ tính \emph{chỉ trên tập trọng số còn sống} $\{i : m_i^{(n-1)} = 1\}$.
             
-            \paragraph{Điều kiện dừng.}
+            \paragraph{\textbf{Điều kiện dừng.}}
             Quá trình lặp dừng khi tỉ lệ thưa thớt đạt mục tiêu $p$:
             \begin{equation}
                 s\!\left(\symbfit{m}^{(n^*)}\right) \;\geq\; p,
@@ -639,7 +652,7 @@
             trong đó $n^* = \left\lceil \dfrac{\ln\!\left(\dfrac{1-p}{1-p_k}\right)}{\ln(1-p_i)} \right\rceil$
             là số bước lặp tối thiểu cần thiết theo lịch trình hình học.
             
-            \paragraph{Tinh chỉnh dựa trên patience (patience-based fine-tuning).}
+            \paragraph{\textbf{Tinh chỉnh dựa trên patience (patience-based fine-tuning).}}
             Sau mỗi bước cắt tỉa, mô hình được tinh chỉnh cho đến khi độ chính xác trên tập kiểm định không cải thiện thêm trong $\rho$ epoch liên tiếp.
             Cụ thể, tại bước $t$ của việc tinh chỉnh, thuật toán dừng sớm nếu:
             \begin{equation}
