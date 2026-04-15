@@ -410,6 +410,61 @@ def get_resnet20_block_masks(
     return weight_masks
 
 
+def find_resnet20_alignment_violations(
+    model: nn.Module,
+    channel_masks: Dict[str, np.ndarray]
+) -> Tuple[int, List[str]]:
+    """Validate residual-block BN mask consistency against authority masks.
+
+    For each block where ``authority_bn`` exists in ``channel_masks``, this checks
+    whether masks for ``bn1``, ``bn2``, and ``shortcut_bn`` (when present) match
+    the authority mask exactly.
+
+    Args:
+        model: ResNet model exposing ``get_block_info`` metadata.
+        channel_masks: Channel masks keyed by BN module names.
+
+    Returns:
+        Tuple of:
+        - Number of blocks checked
+        - List of mismatch descriptors (empty when fully aligned)
+    """
+    checked_blocks = 0
+    violations: List[str] = []
+
+    get_blocks = getattr(model, 'get_block_info', None)
+    if not callable(get_blocks):
+        return checked_blocks, violations
+
+    blocks = get_blocks()
+    for block in blocks:
+        authority_name = block.get('authority_bn')
+        if authority_name not in channel_masks:
+            continue
+
+        checked_blocks += 1
+        authority_mask = np.asarray(channel_masks[authority_name]) > 0.5
+
+        for bn_key in ('bn1', 'bn2', 'shortcut_bn'):
+            bn_name = block.get(bn_key)
+            if bn_name not in channel_masks:
+                continue
+
+            candidate_mask = np.asarray(channel_masks[bn_name]) > 0.5
+            if candidate_mask.shape != authority_mask.shape:
+                violations.append(
+                    f"{block.get('name', 'unknown')}:{bn_name}:shape"
+                )
+                continue
+
+            if not np.array_equal(candidate_mask, authority_mask):
+                violations.append(
+                    f"{block.get('name', 'unknown')}:{bn_name}:values"
+                )
+
+    return checked_blocks, violations
+
+
 def apply_resnet20_block_masks(
     model: nn.Module,
     channel_masks: Dict[str, np.ndarray],
@@ -494,9 +549,8 @@ def train_resnet20_earlybird(
     # Import Early-Bird components
     from src.earlybird import (
         EarlyBirdFinder,
+        align_channel_mask_for_residual_blocks,
         add_l1_regularization_to_bn,
-        get_overall_channel_sparsity,
-        get_channel_sparsity,
     )
     from src.model import resnet20
     
@@ -613,6 +667,18 @@ def train_resnet20_earlybird(
             'model': model,
             'converged': False,
         }
+
+    # Enforce block-wise BN consistency before any pruning mask expansion.
+    eb_ticket = align_channel_mask_for_residual_blocks(eb_ticket, model)
+    checked_blocks, alignment_violations = find_resnet20_alignment_violations(model, eb_ticket)
+    if alignment_violations:
+        preview = ', '.join(alignment_violations[:8])
+        raise RuntimeError(
+            "Residual mask alignment failed for Early-Bird ticket. "
+            f"Violations: {preview}"
+        )
+    if verbose and checked_blocks > 0:
+        print(f"[EB] Residual channel alignment verified for {checked_blocks} blocks.")
     
     # Phase 2: Apply block-wise pruning
     # Get block-wise weight masks

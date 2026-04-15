@@ -37,6 +37,7 @@ from src.earlybird import (
     early_bird_search_offline,
 )
 from src.model import resnet20
+from src.train import get_resnet20_block_masks, find_resnet20_alignment_violations
 from src.util import apply_masks_to_model, create_mask_apply_fn
 
 
@@ -195,6 +196,47 @@ def test_expand_channel_mask_to_conv_weights_resnet_block_alignment():
         assert conv_name in wm
         per_out = (wm[conv_name].reshape(authority_mask.shape[0], -1).sum(axis=1) > 0).astype(np.float32)
         np.testing.assert_allclose(per_out, authority_mask)
+
+
+def test_find_resnet20_alignment_violations_detects_misaligned_block_masks():
+    model = resnet20(num_classes=10)
+    channel_mask = {
+        'layer2.0.bn2': np.concatenate([np.ones(8), np.zeros(24)]).astype(np.float32),
+        'layer2.0.bn1': np.concatenate([np.zeros(8), np.ones(24)]).astype(np.float32),
+        'layer2.0.shortcut.1': np.concatenate([np.zeros(16), np.ones(16)]).astype(np.float32),
+    }
+
+    checked_blocks, violations = find_resnet20_alignment_violations(model, channel_mask)
+
+    assert checked_blocks >= 1
+    assert len(violations) >= 2
+    assert any('layer2.0' in v for v in violations)
+
+
+def test_get_resnet20_block_masks_uses_aligned_ticket_consistently():
+    model = resnet20(num_classes=10)
+    authority_mask = np.concatenate([np.ones(8), np.zeros(24)]).astype(np.float32)
+    channel_mask = {
+        'layer2.0.bn2': authority_mask,
+        # Deliberately contradictory values should be overwritten by alignment.
+        'layer2.0.bn1': np.concatenate([np.zeros(8), np.ones(24)]).astype(np.float32),
+        'layer2.0.shortcut.1': np.concatenate([np.zeros(16), np.ones(16)]).astype(np.float32),
+    }
+
+    aligned = align_channel_mask_for_residual_blocks(channel_mask, model)
+    checked_blocks, violations = find_resnet20_alignment_violations(model, aligned)
+    assert checked_blocks >= 1
+    assert violations == []
+
+    wm = get_resnet20_block_masks(model, aligned)
+    for conv_name in ('layer2.0.conv1', 'layer2.0.conv2', 'layer2.0.shortcut.0'):
+        assert conv_name in wm
+        per_out = (wm[conv_name].reshape(authority_mask.shape[0], -1).sum(axis=1) > 0).astype(np.float32)
+        np.testing.assert_allclose(per_out, authority_mask)
+
+    # Conv2 input channels should be pruned consistently with authority mask.
+    conv2_input = (wm['layer2.0.conv2'].sum(axis=(0, 2, 3)) > 0).astype(np.float32)
+    np.testing.assert_allclose(conv2_input, authority_mask)
 
 
 def test_apply_masks_to_model_masks_bn_affine_params():
