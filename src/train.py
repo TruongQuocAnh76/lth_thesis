@@ -333,81 +333,14 @@ def get_resnet20_block_masks(
     model: nn.Module,
     channel_masks: Dict[str, np.ndarray]
 ) -> Dict[str, np.ndarray]:
-    """Convert channel masks to weight masks for ResNet20 with block-wise pruning.
-    
-    For ResNet, we use the BN before the residual add (bn2) as the authority.
-    The same mask is applied to:
-    - conv1 output channels (first conv in block)
-    - conv2 output channels (second conv in block)  
-    - shortcut conv output channels (if downsampling exists)
-    
-    Args:
-        model: ResNet20 model
-        channel_masks: Channel masks from Early-Bird (keyed by BN layer names)
-    
-    Returns:
-        Weight masks for all Conv2d layers
+    """Convert channel masks to Conv2d weight masks for residual networks.
+
+    Backward-compatible wrapper name retained for existing callers.
+    Supports both BasicBlock-style (ResNet20) and Bottleneck-style
+    (ResNet50) block layouts through shared Early-Bird utilities.
     """
-    weight_masks = {}
-    blocks = model.get_block_info()
-    
-    for block_info in blocks:
-        authority_bn_name = block_info['authority_bn']
-        
-        # Get the authority mask (from bn2)
-        if authority_bn_name not in channel_masks:
-            continue
-            
-        mask = channel_masks[authority_bn_name]  # Shape: (out_channels,)
-        
-        # Get conv layers from model
-        conv1_name = block_info['conv1']
-        conv2_name = block_info['conv2']
-        
-        # Parse names to get actual modules
-        def get_module(name):
-            parts = name.split('.')
-            m = model
-            for p in parts:
-                if p.isdigit():
-                    m = m[int(p)]
-                else:
-                    m = getattr(m, p)
-            return m
-        
-        conv1 = get_module(conv1_name)
-        conv2 = get_module(conv2_name)
-        
-        # Create weight mask for conv1 (output channels)
-        # Conv1 weight shape: (out_channels, in_channels, k, k)
-        conv1_mask = np.ones(conv1.weight.shape, dtype=np.float32)
-        for c in range(len(mask)):
-            if mask[c] == 0:
-                conv1_mask[c, :, :, :] = 0
-        weight_masks[conv1_name] = conv1_mask
-        
-        # Create weight mask for conv2 (output channels AND input channels)
-        # Conv2 takes output of conv1, so prune input channels too
-        conv2_mask = np.ones(conv2.weight.shape, dtype=np.float32)
-        for c in range(len(mask)):
-            if mask[c] == 0:
-                conv2_mask[c, :, :, :] = 0  # Output channels
-                conv2_mask[:, c, :, :] = 0  # Input channels (from conv1)
-        weight_masks[conv2_name] = conv2_mask
-        
-        # Handle shortcut if exists
-        if block_info['has_shortcut']:
-            shortcut_conv_name = block_info['shortcut_conv']
-            shortcut_conv = get_module(shortcut_conv_name)
-            
-            # Shortcut conv output channels must match block output
-            shortcut_mask = np.ones(shortcut_conv.weight.shape, dtype=np.float32)
-            for c in range(len(mask)):
-                if mask[c] == 0:
-                    shortcut_mask[c, :, :, :] = 0
-            weight_masks[shortcut_conv_name] = shortcut_mask
-    
-    return weight_masks
+    from src.earlybird import expand_channel_mask_to_conv_weights
+    return expand_channel_mask_to_conv_weights(channel_masks, model)
 
 
 def find_resnet20_alignment_violations(
@@ -417,8 +350,8 @@ def find_resnet20_alignment_violations(
     """Validate residual-block BN mask consistency against authority masks.
 
     For each block where ``authority_bn`` exists in ``channel_masks``, this checks
-    whether masks for ``bn1``, ``bn2``, and ``shortcut_bn`` (when present) match
-    the authority mask exactly.
+    whether masks for BN layers that share the *same channel shape* are aligned
+    with the authority mask (e.g., ``bn2`` in BasicBlock, ``bn3`` in Bottleneck).
 
     Args:
         model: ResNet model exposing ``get_block_info`` metadata.
@@ -445,16 +378,15 @@ def find_resnet20_alignment_violations(
         checked_blocks += 1
         authority_mask = np.asarray(channel_masks[authority_name]) > 0.5
 
-        for bn_key in ('bn1', 'bn2', 'shortcut_bn'):
+        for bn_key in ('bn1', 'bn2', 'bn3', 'shortcut_bn'):
             bn_name = block.get(bn_key)
             if bn_name not in channel_masks:
                 continue
 
             candidate_mask = np.asarray(channel_masks[bn_name]) > 0.5
             if candidate_mask.shape != authority_mask.shape:
-                violations.append(
-                    f"{block.get('name', 'unknown')}:{bn_name}:shape"
-                )
+                # Shape mismatch is expected for bottleneck internals
+                # (e.g., bn1/bn2 vs authority bn3), so skip it.
                 continue
 
             if not np.array_equal(candidate_mask, authority_mask):
@@ -470,14 +402,14 @@ def apply_resnet20_block_masks(
     channel_masks: Dict[str, np.ndarray],
     weight_masks: Dict[str, np.ndarray]
 ):
-    """Apply block-wise pruning masks to ResNet20.
+    """Apply block-wise pruning masks to residual models.
     
     Zeros out pruned channels in:
     - Conv2d weights
     - BatchNorm parameters (weight, bias, running_mean, running_var)
     
     Args:
-        model: ResNet20 model
+        model: Residual model (e.g., ResNet20 / ResNet50)
         channel_masks: Channel masks from Early-Bird
         weight_masks: Weight masks from get_resnet20_block_masks
     """
@@ -490,19 +422,30 @@ def apply_resnet20_block_masks(
         
         # Apply to BatchNorm layers
         for name, module in model.named_modules():
-            if isinstance(module, nn.BatchNorm2d) and name in channel_masks:
-                mask = torch.from_numpy(channel_masks[name]).float().to(module.weight.device)
-                module.weight.data *= mask
+            if not isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+                continue
+            if name not in channel_masks:
+                continue
+            if module.weight is None:
+                continue
+
+            mask = torch.from_numpy(channel_masks[name]).float().to(module.weight.device)
+            if module.weight.shape[0] != mask.shape[0]:
+                continue
+
+            module.weight.data *= mask
+            if module.bias is not None:
                 module.bias.data *= mask
-                module.running_mean.data *= mask
-                # Avoid division by zero for pruned channels
-                module.running_var.data = module.running_var.data * mask + (1 - mask) * 1.0
+            module.running_mean.data *= mask
+            # Avoid division by zero for pruned channels
+            module.running_var.data = module.running_var.data * mask + (1 - mask) * 1.0
 
 
 def train_resnet20_earlybird(
     train_loader: DataLoader,
     test_loader: DataLoader,
     device: torch.device,
+    model_name: str = "resnet20",
     num_classes: int = 10,
     target_sparsity: float = 0.5,
     total_epochs: int = 160,
@@ -518,16 +461,18 @@ def train_resnet20_earlybird(
     pruning_method: str = 'global',
     verbose: bool = True
 ) -> Dict[str, Any]:
-    """Train ResNet20 with Early-Bird ticket discovery.
+    """Train a residual model with Early-Bird ticket discovery.
     
     Implements block-wise channel pruning for ResNet:
-    - Uses bn2 (before residual add) as authority for each block
-    - Applies same mask to conv1, conv2, and shortcut conv
+    - Uses the BN right before residual add as block authority
+      (bn2 for BasicBlock, bn3 for Bottleneck)
+    - Applies aligned channel masks to corresponding Conv and BN layers
     
     Args:
         train_loader: DataLoader for training data
         test_loader: DataLoader for test data
         device: Device (cuda/cpu)
+        model_name: Residual architecture name (e.g., 'resnet20', 'resnet50')
         num_classes: Number of output classes (default: 10 for CIFAR-10)
         target_sparsity: Fraction of channels to prune (0.3, 0.5, 0.7)
         total_epochs: Maximum training epochs
@@ -552,10 +497,10 @@ def train_resnet20_earlybird(
         align_channel_mask_for_residual_blocks,
         add_l1_regularization_to_bn,
     )
-    from src.model import resnet20
+    from src.model import get_model
     
     # Initialize model
-    model = resnet20(num_classes=num_classes).to(device)
+    model = get_model(model_name, num_classes=num_classes).to(device)
     
     # Setup optimizer, scheduler, criterion
     optimizer = optim.SGD(
@@ -703,6 +648,8 @@ def train_resnet20_earlybird(
     test_loss_pruned, test_acc_pruned = evaluate(model, test_loader, criterion, device)
     
     # Fine-tuning phase
+    if convergence_epoch is None:
+        convergence_epoch = total_epochs - 1
     finetune_epochs = total_epochs - convergence_epoch
     
     # Reset optimizer with appropriate LR
@@ -780,4 +727,3 @@ def train_resnet20_earlybird(
         'actual_sparsity': actual_sparsity,
         'test_acc_pruned': test_acc_pruned,
     }
-

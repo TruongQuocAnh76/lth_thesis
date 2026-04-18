@@ -95,8 +95,9 @@ class ResNet(nn.Module):
         """Get information about residual blocks for block-wise pruning.
         
         Returns block structure needed for Early-Bird:
-        - Authority BN (bn2 in each block - the one before residual add)
-        - Both convs in the block
+        - Authority BN (the BN right before residual add: bn2 for BasicBlock,
+          bn3 for Bottleneck)
+        - Convs in the block (conv1/conv2 and optional conv3)
         - Skip conv (if exists)
         """
         blocks = []
@@ -104,15 +105,24 @@ class ResNet(nn.Module):
         for stage_name in ['layer1', 'layer2', 'layer3']:
             stage = getattr(self, stage_name)
             for block_idx, block in enumerate(stage):
+                has_bottleneck_head = hasattr(block, 'conv3') and hasattr(block, 'bn3')
+                authority_bn = (
+                    f'{stage_name}.{block_idx}.bn3'
+                    if has_bottleneck_head
+                    else f'{stage_name}.{block_idx}.bn2'
+                )
                 block_info = {
                     'name': f'{stage_name}.{block_idx}',
-                    'authority_bn': f'{stage_name}.{block_idx}.bn2',  # BN before residual add
+                    'authority_bn': authority_bn,  # BN before residual add
                     'conv1': f'{stage_name}.{block_idx}.conv1',
                     'bn1': f'{stage_name}.{block_idx}.bn1',
                     'conv2': f'{stage_name}.{block_idx}.conv2',
                     'bn2': f'{stage_name}.{block_idx}.bn2',
                     'has_shortcut': len(block.shortcut) > 0,
                 }
+                if has_bottleneck_head:
+                    block_info['conv3'] = f'{stage_name}.{block_idx}.conv3'
+                    block_info['bn3'] = f'{stage_name}.{block_idx}.bn3'
                 if block_info['has_shortcut']:
                     block_info['shortcut_conv'] = f'{stage_name}.{block_idx}.shortcut.0'
                     block_info['shortcut_bn'] = f'{stage_name}.{block_idx}.shortcut.1'

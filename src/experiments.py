@@ -3789,7 +3789,7 @@ def run_experiment(
         return experiment.run()
     
     elif algorithm.lower() == "earlybird_resnet":
-        # Early-Bird ResNet with block-wise pruning
+        # Early-Bird ResNet with block-wise pruning (supports resnet20/resnet50)
         from src.train import train_resnet20_earlybird
         from src.data import get_dataloaders
         
@@ -3826,6 +3826,7 @@ def run_experiment(
             train_loader=train_loader,
             test_loader=test_loader,
             device=device_obj,
+            model_name=model,
             num_classes=num_classes,
             target_sparsity=target_sparsity,
             total_epochs=total_epochs,

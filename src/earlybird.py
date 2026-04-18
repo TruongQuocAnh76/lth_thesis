@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 
 
 def extract_bn_gammas(model: nn.Module) -> Dict[str, np.ndarray]:
@@ -477,9 +477,10 @@ def align_channel_mask_for_residual_blocks(
 ) -> Dict[str, np.ndarray]:
     """Align BN channel masks within residual blocks using authority BN masks.
 
-    For models that expose ``get_block_info`` (e.g., ResNet-20), we propagate
-    each block's authority mask (bn2) to bn1/bn2/shortcut BN so main and skip
-    paths use a consistent active-channel set before residual addition.
+    For models that expose ``get_block_info`` (e.g., ResNet-20/50), we propagate
+    each block's authority mask (the BN right before residual addition) to
+    same-shape BN peers so main and skip paths use a consistent active-channel
+    set before residual addition.
     """
     aligned = {k: np.asarray(v, dtype=np.float32).copy() for k, v in channel_mask.items()}
 
@@ -498,7 +499,7 @@ def align_channel_mask_for_residual_blocks(
             continue
 
         authority_mask = aligned[authority_name]
-        for bn_key in ('bn1', 'bn2', 'shortcut_bn'):
+        for bn_key in _block_bn_keys(block):
             bn_name = block.get(bn_key)
             if bn_name in aligned and aligned[bn_name].shape == authority_mask.shape:
                 aligned[bn_name] = authority_mask.copy()
@@ -523,6 +524,24 @@ def _get_module_by_name(model: nn.Module, module_name: str) -> Optional[nn.Modul
             module = getattr(module, part)
 
     return module
+
+
+def _block_conv_keys(block: Dict[str, Any]) -> List[str]:
+    """Return present convolution keys in canonical residual-block order."""
+    keys: List[str] = []
+    for key in ('conv1', 'conv2', 'conv3', 'shortcut_conv'):
+        if block.get(key):
+            keys.append(key)
+    return keys
+
+
+def _block_bn_keys(block: Dict[str, Any]) -> List[str]:
+    """Return present BN keys in canonical residual-block order."""
+    keys: List[str] = []
+    for key in ('bn1', 'bn2', 'bn3', 'shortcut_bn'):
+        if block.get(key):
+            keys.append(key)
+    return keys
 
 
 def _expand_channel_mask_with_block_info(
@@ -554,7 +573,14 @@ def _expand_channel_mask_with_block_info(
         block_mask = np.asarray(channel_mask[authority_bn_name], dtype=np.float32)
         num_channels = len(block_mask)
 
-        for conv_key in ('conv1', 'conv2', 'shortcut_conv'):
+        conv_to_bn_key = {
+            'conv1': 'bn1',
+            'conv2': 'bn2',
+            'conv3': 'bn3',
+            'shortcut_conv': 'shortcut_bn',
+        }
+
+        for conv_key in _block_conv_keys(block):
             conv_name = block.get(conv_key)
             if not conv_name:
                 continue
@@ -579,8 +605,9 @@ def _expand_channel_mask_with_block_info(
                 conv_mask = conv_mask * input_mask
 
             weight_masks[conv_name] = conv_mask
-
-        for bn_key in ('bn1', 'bn2', 'shortcut_bn'):
+            bn_key = conv_to_bn_key.get(conv_key)
+            if not bn_key:
+                continue
             bn_name = block.get(bn_key)
             if bn_name in channel_mask:
                 covered_bn_names.add(bn_name)
