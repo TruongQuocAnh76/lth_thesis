@@ -92,7 +92,8 @@ def compute_synflow_scores(
         Dictionary ``{layer_name: score_tensor}`` for every Conv2d / Linear
         layer in the model.  Scores are non-negative.
     """
-    model.eval()
+    pre_training = model.training
+    model.train()
 
     # Step 1 – linearise
     signs = _linearise(model)
@@ -113,11 +114,10 @@ def compute_synflow_scores(
                 scores[name] = score.cpu()
             module.weight.grad = None          # reset for next iteration
 
-    # Step 5 – restore signs
+    # Step 5 – restore signs and original training mode
     _restore(model, signs)
-
-    # Zero all remaining gradients
-    model.zero_grad()
+    model.zero_grad()  # ensure no gradients remain
+    model.train(pre_training)  # restore original training mode
 
     return scores
 
