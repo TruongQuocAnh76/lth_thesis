@@ -51,18 +51,18 @@ def _linearise(model: nn.Module) -> Dict[str, torch.Tensor]:
         Dictionary of original parameter signs so we can restore later.
     """
     signs: Dict[str, torch.Tensor] = {}
-    for name, param in model.state_dict().items():
-        signs[name] = torch.sign(param)
-        param.abs_()
+    for name, param in model.named_parameters():
+        signs[name] = torch.sign(param.data)
+        param.data.abs_()
     return signs
 
 
 @torch.no_grad()
 def _restore(model: nn.Module, signs: Dict[str, torch.Tensor]):
     """Restore original parameter signs after scoring."""
-    for name, param in model.state_dict().items():
+    for name, param in model.named_parameters():
         if name in signs:
-            param.mul_(signs[name])
+            param.data.mul_(signs[name])
 
 
 # ---------------------------------------------------------------------------
@@ -168,9 +168,11 @@ def synflow_pruning(
 
     # Initialise masks (all ones)
     masks: Dict[str, torch.Tensor] = {}
+    original_weights: Dict[str, torch.Tensor] = {}
     for name, module in model_copy.named_modules():
         if isinstance(module, (nn.Conv2d, nn.Linear)):
             masks[name] = torch.ones_like(module.weight.data)
+            original_weights[name] = module.weight.data.clone()
 
     # Compression ratio ρ  (fraction of weights to *keep*)
     # ρ = 10 → keep_ratio = 1/10 = 0.1  (90 % sparsity)
@@ -183,11 +185,12 @@ def synflow_pruning(
         return {k: np.zeros_like(v.numpy()) for k, v in masks.items()}
 
     for k in range(1, num_iters + 1):
-        # Apply current mask to weights
+        # Rebuild masked weights from the original parameter snapshot.
         with torch.no_grad():
             for name, module in model_copy.named_modules():
-                if name in masks:
-                    module.weight.data.mul_(masks[name].to(device))
+                if name in masks and name in original_weights:
+                    mask = masks[name].to(device)
+                    module.weight.data.copy_(original_weights[name] * mask)
 
         # Compute scores
         scores = compute_synflow_scores(model_copy, device, input_shape)
