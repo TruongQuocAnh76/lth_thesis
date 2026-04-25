@@ -1,6 +1,0 @@
-phase,epoch,train_loss,train_acc,test_loss,test_acc
-initial_training,1,0.7049,50.00,0.6938,50.00
-one-shot,1,0.6543,50.00,0.6940,50.00
-iter-1,1,0.6629,50.00,0.6943,50.00
-iter-2,1,0.6981,50.00,0.6944,50.00
-iter-3,1,0.6881,50.00,0.6945,50.00
