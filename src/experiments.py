@@ -4531,6 +4531,8 @@ Examples:
                              choices=["cosine", "none"], default=None,
                              help="Scheduler for iterative fine-tuning "
                                   "(default: none, i.e. constant LR)")
+    hybrid_group.add_argument("--dense_run_dir", type=str, default=None,
+                             help="Path to a dense run directory to warm-start from (contains final_model.pt)")
 
     # Common training arguments
     train_group = parser.add_argument_group('Training arguments')
@@ -4633,6 +4635,7 @@ Examples:
             kwargs['resume_from'] = args.resume_from
             kwargs['time_limit_seconds'] = args.time_limit
             kwargs['checkpoint_interval'] = args.checkpoint_interval
+            kwargs['dense_run_dir'] = args.dense_run_dir
 
         elif args.algorithm == "hybrid_improve":
             kwargs['target_sparsity'] = args.target_sparsity
@@ -4651,6 +4654,7 @@ Examples:
             kwargs['resume_from'] = args.resume_from
             kwargs['time_limit_seconds'] = args.time_limit
             kwargs['checkpoint_interval'] = args.checkpoint_interval
+            kwargs['dense_run_dir'] = args.dense_run_dir
 
         elif args.algorithm == "genetic":
             kwargs['population_size'] = args.population_size
