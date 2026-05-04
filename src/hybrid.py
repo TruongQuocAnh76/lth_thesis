@@ -19,6 +19,7 @@ Reference implementation: ``pruning-benchmark/`` ``HybridStepScheduler``.
 """
 
 import copy
+import json
 import math
 import time as _time
 from pathlib import Path
@@ -109,6 +110,62 @@ class EarlyStopper:
             self.best = -math.inf
         else:
             self.best = math.inf
+
+
+def _load_dense_run(
+    run_dir: str | Path,
+) -> Tuple[dict, Optional[dict], Optional[float]]:
+    """Load a dense run's final/initial weights and accuracy, if available."""
+    run_path = Path(run_dir)
+    final_model_path = run_path / "final_model.pt"
+    if not final_model_path.is_file():
+        raise FileNotFoundError(
+            f"Dense run missing final_model.pt at: {final_model_path}"
+        )
+
+    final_payload = torch.load(
+        final_model_path, map_location="cpu", weights_only=False
+    )
+    dense_state = (
+        final_payload.get("state_dict")
+        if isinstance(final_payload, dict) and "state_dict" in final_payload
+        else final_payload
+    )
+    if any(key.startswith("module.") for key in dense_state.keys()):
+        dense_state = {
+            key.replace("module.", "", 1): value
+            for key, value in dense_state.items()
+        }
+
+    initial_state = None
+    initial_model_path = run_path / "initial_model.pt"
+    if initial_model_path.is_file():
+        initial_payload = torch.load(
+            initial_model_path, map_location="cpu", weights_only=False
+        )
+        initial_state = (
+            initial_payload.get("state_dict")
+            if isinstance(initial_payload, dict)
+            and "state_dict" in initial_payload
+            else initial_payload
+        )
+        if any(key.startswith("module.") for key in initial_state.keys()):
+            initial_state = {
+                key.replace("module.", "", 1): value
+                for key, value in initial_state.items()
+            }
+
+    dense_test_acc = None
+    results_path = run_path / "results.json"
+    if results_path.is_file():
+        with open(results_path, "r") as handle:
+            dense_results = json.load(handle)
+        final_results = dense_results.get("final_results", {})
+        dense_test_acc = final_results.get("dense_test_accuracy")
+        if dense_test_acc is None:
+            dense_test_acc = final_results.get("final_test_accuracy")
+
+    return dense_state, initial_state, dense_test_acc
 
 
 # =========================================================================
@@ -433,6 +490,8 @@ def hybrid_pruning(
     checkpoint_interval: int = 1,
     time_limit_seconds: Optional[float] = None,
     resume_from: Optional[str] = None,
+    # -- Dense warm-start -----------------------------------------------
+    dense_run_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run the complete hybrid pruning experiment.
 
@@ -490,6 +549,10 @@ def hybrid_pruning(
         resume_from: Path to a checkpoint file (``*.pt``) written by
             a previous run.  The experiment resumes from the saved
             phase and step.
+        dense_run_dir: Optional path to a dense run directory containing
+            ``final_model.pt`` (and optionally ``initial_model.pt`` and
+            ``results.json``). When provided, initial training is skipped
+            and pruning starts from the dense model.
 
     Returns:
         Dictionary containing:
@@ -511,6 +574,8 @@ def hybrid_pruning(
             f"Invalid iter_scheduler_type='{iter_scheduler_type}'. "
             f"Choose from {sorted(valid_scheduler_types)}"
         )
+    if resume_from is not None and dense_run_dir is not None:
+        raise ValueError("resume_from and dense_run_dir are mutually exclusive")
 
     # Auto-select iterative step if not provided
     if iterative_step is None:
@@ -547,6 +612,7 @@ def hybrid_pruning(
         "seed": seed,
         "pruning_steps": steps,
         "num_pruning_phases": len(steps),
+        "dense_run_dir": dense_run_dir,
     }
 
     results: Dict[str, Any] = {"config": config, "phases": []}
@@ -635,6 +701,23 @@ def hybrid_pruning(
     # Resume from checkpoint (if provided)
     # ------------------------------------------------------------------ #
     skip_initial_training = False
+
+    if dense_run_dir is not None:
+        dense_state, dense_init_state, dense_acc = _load_dense_run(dense_run_dir)
+        raw_model.load_state_dict(dense_state)
+        model.to(device)
+        if dense_init_state is not None:
+            initial_model_state_dict = copy.deepcopy(dense_init_state)
+        results["initial_training"] = {
+            "train_losses": [],
+            "train_accs": [],
+            "test_losses": [],
+            "test_accs": [],
+            "final_test_acc": float(dense_acc) if dense_acc is not None else 0.0,
+        }
+        init_test_acc = results["initial_training"]["final_test_acc"]
+        skip_initial_training = True
+        print(f"Loaded dense run from: {dense_run_dir}")
 
     if resume_from is not None:
         ckpt = load_hybrid_checkpoint(resume_from, verbose=verbose)

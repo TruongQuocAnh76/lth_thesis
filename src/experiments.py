@@ -4103,6 +4103,7 @@ def run_experiment(
         momentum = kwargs.get('momentum', 0.9)
         weight_decay = kwargs.get('weight_decay', 5e-4)
         use_global_pruning = kwargs.get('use_global_pruning', True)
+        dense_run_dir = kwargs.get('dense_run_dir', None)
         resume_from = kwargs.get('resume_from', None)
         time_limit_seconds = kwargs.get('time_limit_seconds', None)
         checkpoint_interval = kwargs.get('checkpoint_interval', 10)
@@ -4138,6 +4139,7 @@ def run_experiment(
             checkpoint_interval=checkpoint_interval,
             time_limit_seconds=time_limit_seconds,
             resume_from=resume_from,
+            dense_run_dir=dense_run_dir,
         )
 
         # Save results to disk (JSON + summary CSV)
@@ -4262,6 +4264,7 @@ def run_experiment(
         weight_decay = kwargs.get('weight_decay', 5e-4)
         seed = kwargs.get('seed', 42)
         device = kwargs.get('device', 'cuda')
+        dense_run_dir = kwargs.get('dense_run_dir', None)
         resume_from = kwargs.get('resume_from', None)
         time_limit_seconds = kwargs.get('time_limit_seconds', None)
         checkpoint_interval = kwargs.get('checkpoint_interval', 1)
@@ -4295,6 +4298,7 @@ def run_experiment(
             time_limit_seconds=time_limit_seconds,
             checkpoint_interval=checkpoint_interval,
             verbose=True,
+            dense_run_dir=dense_run_dir,
         )
 
         return results

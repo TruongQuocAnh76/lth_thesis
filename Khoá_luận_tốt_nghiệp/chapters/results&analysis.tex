@@ -1,412 +1,211 @@
 \chapter{Kết quả}
-% ─────────────────────────────────────────────────────────────────────────────
 \section{Độ chính xác theo độ thưa mục tiêu}
 \label{sec:accuracy_vs_sparsity}
 
-\begin{figure}[ht]
-	\centering
-	\includegraphics[width=0.95\textwidth]{../Khoá_luận_tốt_nghiệp/image/acc_vs_sparsity-resnet20_cifar10.png}
-	\caption{Độ chính xác kiểm thử của từng thuật toán khi độ thưa mục tiêu tăng từ $30\%$ đến $90\%$ trên ResNet-20 CIFAR-10.}
-	\label{fig:acc_vs_sparsity}
-\end{figure}
 
-Hai kiểu hành vi khác nhau xuất hiện:
-
-\paragraph{Nhóm A — Suy giảm êm (graceful degradation).}
-GraSP, SynFlow, Hybrid, Hybrid-Improve và IMP đều giữ độ chính xác kiểm thử trong khoảng
-$88.7\%$–$91.2\%$ ở cả ba mức độ thưa.
-Tại $S=0.30$, IMP và Hybrid-Improve bám sát nhất baseline dày đặc ($\approx 91.2\%$ và
-$\approx 91.0\%$, tương ứng), trong khi GraSP và SynFlow thấp hơn đôi chút ($\approx 90.1\%$).
-Khi độ thưa tăng lên $S=0.60$, khoảng cách giữa mô hình tốt nhất và kém nhất trong nhóm này
-thu hẹp lại, cho thấy các chiến lược lặp dựa trên độ lớn trọng số hoặc chiến lược lai đều khá
-ổn định ở mức nén trung bình.
-Ngay cả ở mức khắc nghiệt $S=0.90$, Hybrid ($\approx 88.9\%$) và Hybrid-Improve
-($\approx 88.9\%$) vẫn dẫn đầu nhóm, theo sát là GraSP ($\approx 88.9\%$).
-IMP ($\approx 86.8\%$) và SynFlow ($\approx 86.7\%$) thấp hơn một chút, cho thấy rằng bản chất
-one-shot dựa trên khởi tạo của GraSP và SynFlow, dù là không cần dữ liệu, cũng không phải lúc
-nào cũng kém hơn IMP tốn kém ở mức độ thưa cực cao trên kiến trúc này.
-
-\paragraph{Nhóm B — Sụp đổ nghiêm trọng (catastrophic collapse).}
-Early-Bird lệch hẳn khỏi phần còn lại.
-Độ chính xác của nó tại $S=0.30$ đã là thấp nhất trong toàn bộ nhóm ($\approx 89.4\%$, thấp hơn
-mô hình tốt nhất khoảng $2.1$ điểm phần trăm), và sau đó giảm rất nhanh: tại $S=0.60$ còn
-$\approx 87.7\%$, và tại $S=0.90$ thì sụp xuống khoảng $\approx 69.0\%$, tức giảm hơn $22$
-điểm phần trăm so với baseline dày đặc.
-Hành vi này xuất phát từ thiết kế cốt lõi của Early-Bird, vốn thực hiện
-\emph{tỉa kênh có cấu trúc} (structured channel pruning) dựa trên các hệ số co giãn Batch
-Normalization thay vì tỉa trọng số rời rạc ở mức từng weight.
-Tỉa kênh loại bỏ toàn bộ feature map; ở mức độ thưa rất cao, các khối của ResNet-20 trở nên
-quá hẹp đến mức mạng mất năng lực biểu diễn một cách không thể đảo ngược.
-
-% ─────────────────────────────────────────────────────────────────────────────
-\section{Mức giảm độ chính xác}
-\label{sec:accuracy_drop}
+Hình~\ref{fig:acc_vs_sparsity} biểu diễn độ chính xác kiểm tra của từng thuật toán khi sparsity tăng từ $30\%$ đến $90\%$.
+Hai kiểu hành vi khác biệt rõ rệt xuất hiện.
 
 \begin{figure}[ht]
 	\centering
 	\includegraphics[width=0.95\textwidth]{../Khoá_luận_tốt_nghiệp/image/accdrop_resnet20_cifar10.png}
-	\caption{Mức giảm tuyệt đối của độ chính xác cho từng thuật toán ở mỗi mức độ thưa trên ResNet-20 CIFAR-10.}
+	\caption{Độ giảm độ chính xác tuyệt đối của từng thuật toán theo từng mức sparsity trên ResNet-20 CIFAR-10.}
 	\label{fig:acc_drop}
 \end{figure}
 
-Hình~\ref{fig:acc_drop} trình bày mức giảm tuyệt đối của độ chính xác cho từng thuật toán ở
-mỗi mức độ thưa. Cách nhìn này tách riêng \emph{chi phí của việc nén} khỏi độ chính xác ban đầu.
+\paragraph{Nhóm A — Suy giảm mượt.}
+GraSP, SynFlow, Hybrid, Hybrid-Improve, và IMP đều duy trì độ chính xác trong khoảng
+$88.7\%$–$91.2\%$ trên cả ba mức sparsity.
+Tại $S=0.30$, IMP và Hybrid-Improve đạt gần baseline nhất ($\approx 91.2\%$ và $\approx 91.0\%$), trong khi GraSP và SynFlow thấp hơn nhẹ ($\approx 90.1\%$).
+Khi sparsity tăng lên $S=0.60$, khoảng cách giữa thuật toán tốt nhất và kém nhất trong nhóm này thu hẹp lại, cho thấy các chiến lược pruning lặp hoặc lai có độ bền vững cao ở mức nén trung bình.
+Ngay cả ở mức rất cao $S=0.90$, Hybrid ($\approx 88.9\%$) và Hybrid-Improve ($\approx 88.9\%$) dẫn đầu, tiếp theo là GraSP ($\approx 88.9\%$).
+IMP ($\approx 86.8\%$) và SynFlow ($\approx 86.7\%$) tụt nhẹ phía sau, cho thấy các phương pháp one-shot dựa trên khởi tạo như GraSP và SynFlow, dù không dùng dữ liệu, không hề kém hơn rõ rệt so với IMP vốn tốn kém ở mức sparsity cực cao trên kiến trúc này.
 
-Tại $S=0.30$, tất cả các thuật toán trừ Early-Bird đều chỉ chịu mức giảm khiêm tốn từ
-$1.3\%$--$1.4\%$ (SynFlow, Hybrid, GraSP) xuống đến $0.3\%$--$0.5\%$ (IMP, Hybrid-Improve),
-phản ánh việc mức thưa $30\%$ vẫn nằm trong khả năng chịu đựng của ResNet-20 đối với tất cả
-các phương pháp tỉa không có cấu trúc.
-IMP đạt mức giảm thấp nhất ở đây vì chu trình lặp tỉa và hoàn nguyên trọng số
-(weight rewind) của nó bảo toàn cẩn thận các kết nối có độ lớn cao nhất qua nhiều lần huấn luyện
-đầy đủ.
-Hybrid-Improve bám rất sát IMP nhờ tỷ lệ one-shot thích nghi được điều khiển bởi thông tin
-Fisher, kết hợp với Knowledge Distillation trong pha one-shot, giúp mô hình con sau khi tỉa
-luôn bám gần với mô hình giáo viên dày đặc.
+\paragraph{Nhóm B — Sụp đổ nghiêm trọng.}
+Early-Bird thể hiện hành vi hoàn toàn khác.
+Độ chính xác của nó tại $S=0.30$ đã thấp nhất ($\approx 89.4\%$, kém khoảng $2.1$ điểm phần trăm so với tốt nhất), và giảm nhanh: tại $S=0.60$ còn $\approx 87.7\%$, và tại $S=0.90$ sụp xuống $\approx 69.0\%$, tức giảm hơn $22$ điểm phần trăm so với baseline.
+Nguyên nhân nằm ở thiết kế cơ bản của Early-Bird, sử dụng \emph{structured channel pruning} dựa trên hệ số Batch Normalisation thay vì pruning ở mức trọng số riêng lẻ.
+Việc loại bỏ toàn bộ channel tương đương với loại bỏ cả feature map; ở sparsity cao, các block của ResNet-20 trở nên quá hẹp và mất năng lực biểu diễn không thể phục hồi.
+Ngoài ra, Early-Bird xác định “ticket” rất sớm trong quá trình huấn luyện (khoảng $6\%$--$20\%$ tổng số epoch~\cite{earlybird}), nên mask được suy ra từ một mô hình chưa được huấn luyện đầy đủ, làm cho các điểm số độ quan trọng của channel trở nên nhiễu hơn ở các mức nén cao.
 
-Tại $S=0.60$, thứ hạng nhìn chung có sự thay đổi.
-Hybrid-Improve trở thành phương pháp ít gây tổn hại nhất ($\approx 0.8\%$), IMP đứng thứ hai
-($\approx 1.0\%$), tiếp theo là Synflow ($\approx 1.5\%$), Hybrid($\approx 1.7\%$), GraSP
-($\approx 2.0\%$), và cuối cùng là Early-Bird ($\approx 4.8\%$).
-Mức tăng tương đối nhỏ của độ giảm khi đi từ $S=0.30$ lên $S=0.60$ đối với Hybrid và
-Hybrid-Improve cho thấy tính bền vững của chiến lược tỉa theo giai đoạn: khoảng thời gian
-fine-tuning dài sau bước one-shot lớn ban đầu cho phép mạng hồi phục trước khi bước tinh chỉnh
-lặp theo cấp số nhân bắt đầu.
+\section{Phân tích độ giảm độ chính xác}
+\label{sec:accuracy_drop}
 
-So sánh đáng chú ý nhất xuất hiện tại $S=0.90$.
-Mức giảm của Early-Bird ($\approx 23\%$) tăng đột biến so với $S=0.60$, phản ánh sự sụp đổ nghiêm trọng đã đề cập ở trên.
-Trong khi đối với các thuật toán còn lại, Hybrid-Improve đạt mức giảm thấp nhất ($\approx 3.1\%$),
-theo sát là Hybrid ($\approx 3.5\%$), trong khi GraSP ($\approx 5.0\%$), IMP ($\approx 5.2\%$)
-và SynFlow ($\approx 5.8\%$) chịu suy giảm lớn hơn khoảng $60\%$--$90\%$ so với các phương
-pháp hybrid.
+Hình~\ref{fig:acc_drop} trình bày độ giảm độ chính xác tuyệt đối của từng thuật toán tại mỗi mức sparsity. Góc nhìn này tách riêng \emph{chi phí của việc nén} khỏi độ chính xác ban đầu.
 
-Hiệu năng vượt trội của các biến thể hybrid ở mức độ thưa cực cao phù hợp với quan sát trong
-bài báo gốc về Hybrid~\cite{hybrid} rằng tỉa one-shot chiếm ưu thế ở mức nén thấp, trong khi
-tỉa lặp dần trở nên quan trọng hơn ở mức nén cao.
-Bằng cách kết hợp linh hoạt cả hai trong cùng một lịch trình, Hybrid và Hybrid-Improve thừa
-hưởng ưu điểm của cả hai chế độ.
-Hybrid-Improve còn mở rộng lợi thế này nhờ: (i) tỷ lệ one-shot thích nghi $r_k$ được điều khiển
-bởi độ nhạy Fisher — mô hình có tín hiệu gradient mạnh sẽ nhận bước one-shot nhỏ hơn, qua đó
-giữ lại nhiều năng lực hơn cho pha lặp; và (ii) lịch warm-up learning rate ở mỗi bước lặp, cho
-phép các trọng số còn sống tái tổ chức trước khi cosine annealing thu hẹp vùng tối ưu.
+Tại $S=0.30$, tất cả các thuật toán ngoại trừ Early-Bird đều chịu mức giảm nhỏ từ $1.3\%$–$1.4\%$ (SynFlow, Hybrid, GraSP) đến $0.3\%$–$0.5\%$ (IMP, Hybrid-Improve), cho thấy mức sparsity $30\%$ nằm trong khả năng của ResNet-20 đối với các phương pháp unstructured.
+IMP đạt mức giảm thấp nhất nhờ chu trình lặp pruning và weight-rewinding, giữ lại các kết nối có độ lớn cao nhất qua nhiều lần huấn luyện đầy đủ.
+Hybrid-Improve đạt kết quả gần tương đương nhờ tỉ lệ one-shot thích nghi dựa trên Fisher information, kết hợp với Knowledge Distillation trong pha one-shot, giúp ràng buộc mô hình đã prune gần với mô hình dense ban đầu.
 
-Khoảng cách hiệu năng giữa IMP và các biến thể hybrid tại $S=0.90$ đáng chú ý vì IMP là
-phương pháp tốn kém tính toán nhất.
-Điều này cho thấy chu trình tỉa--huấn luyện lại--hoàn nguyên của IMP, dù có nền tảng lý thuyết
-vững chắc từ Lottery Ticket Hypothesis, không nhất thiết dẫn tới độ chính xác cao hơn ở độ
-thưa cực đại trên các kiến trúc nhỏ gọn như ResNet-20.
+Tại $S=0.60$, thứ hạng nhìn chung được giữ nguyên.
+Hybrid-Improve vẫn gây ít tổn thất nhất ($\approx 0.8\%$), Hybrid đứng thứ hai ($\approx 1.7\%$), tiếp theo là IMP ($\approx 1.0\%$), SynFlow ($\approx 1.5\%$), và GraSP ($\approx 2.0\%$).
+Mức tăng nhỏ từ $S=0.30$ lên $S=0.60$ đối với Hybrid và Hybrid-Improve cho thấy tính bền vững của chiến lược pruning theo giai đoạn: quá trình fine-tuning kéo dài sau bước one-shot lớn giúp mạng phục hồi trước khi bước tinh chỉnh lặp bắt đầu.
+
+So sánh rõ ràng nhất xuất hiện tại $S=0.90$.
+Early-Bird bị loại khỏi so sánh định lượng do mức giảm quá lớn ($\approx 23\%$).
+Trong các thuật toán còn lại, Hybrid-Improve đạt mức giảm nhỏ nhất ($\approx 3.1\%$), tiếp theo Hybrid ($\approx 3.5\%$), trong khi GraSP ($\approx 5.0\%$), IMP ($\approx 5.2\%$), và SynFlow ($\approx 5.8\%$) suy giảm mạnh hơn khoảng $60\%$–$90\%$ so với các phương pháp hybrid.
+
+Hiệu năng vượt trội của các biến thể hybrid ở sparsity cực cao phù hợp với quan sát trong bài báo Hybrid gốc~\cite{hybrid}: one-shot pruning chiếm ưu thế ở mức nén thấp trong khi iterative pruning chiếm ưu thế ở mức nén cao.
+Bằng cách kết hợp linh hoạt cả hai trong một lịch trình duy nhất, Hybrid và Hybrid-Improve thừa hưởng điểm mạnh của từng chế độ.
+Hybrid-Improve mở rộng lợi thế này thông qua: (i) tỉ lệ one-shot thích nghi $r_k$ dựa trên độ nhạy Fisher — mô hình có tín hiệu gradient cao sẽ nhận bước one-shot nhỏ hơn, giữ lại nhiều năng lực cho pha iterative; và (ii) lịch học warm-up ở mỗi bước iterative, giúp các trọng số còn lại tái tổ chức trước khi cosine annealing thu hẹp vùng tối ưu.
+
+Khoảng cách hiệu năng giữa IMP và các biến thể hybrid tại $S=0.90$ là đáng chú ý vì IMP là phương pháp tốn kém tính toán nhất.
+Điều này cho thấy chu trình prune–retrain–rewind của IMP, mặc dù có nền tảng lý thuyết từ Lottery Ticket Hypothesis, không nhất thiết chuyển thành độ chính xác vượt trội ở mức sparsity cực cao trên các kiến trúc nhỏ gọn như ResNet-20.
 
 % ─────────────────────────────────────────────────────────────────────────────
-\section{Mức giảm FLOPs so với độ chính xác và chi phí huấn luyện}
+\section{Đánh đổi hiệu quả: FLOPs tiết kiệm so với độ chính xác và chi phí huấn luyện}
 \label{sec:efficiency_tradeoff}
+% ─────────────────────────────────────────────────────────────────────────────
+
+Hình~\ref{fig:efficiency_tradeoff} trình bày các biểu đồ phân tán của (trái) độ chính xác kiểm tra so với FLOPs tiết kiệm, và (phải) chi phí huấn luyện tính bằng giây so với FLOPs tiết kiệm.
+Hai biểu đồ này cùng tạo nên một bức tranh tối ưu đa mục tiêu: một thuật toán lý tưởng nằm ở vùng \emph{trên-phải} của biểu đồ bên trái (độ chính xác cao với mức tiết kiệm FLOPs lớn) và vùng \emph{dưới-phải} của biểu đồ bên phải (chi phí huấn luyện thấp với mức tiết kiệm FLOPs lớn).
 
 \begin{figure}[ht]
 	\centering
 	\includegraphics[width=0.95\textwidth]{../Khoá_luận_tốt_nghiệp/image/acc+cost_vs_flops_saved-resnet20_cifar10.png}
-	\caption{Biểu đồ phân tán: (trái) Độ chính xác kiểm thử theo FLOPs tiết kiệm, (phải) Chi phí huấn luyện (giây) theo FLOPs tiết kiệm cho từng thuật toán trên ResNet-20 CIFAR-10.}
+	\caption{Đánh đổi giữa độ chính xác, chi phí huấn luyện và FLOPs tiết kiệm trên ResNet-20 CIFAR-10.}
 	\label{fig:efficiency_tradeoff}
 \end{figure}
 
-Hình~\ref{fig:efficiency_tradeoff} trình bày các biểu đồ phân tán của (trái) độ chính xác
-kiểm thử theo FLOPs tiết kiệm, và (phải) chi phí huấn luyện theo giây theo FLOPs tiết kiệm.
-Một thuật toán lý tưởng sẽ nằm ở vùng
-\emph{trên-phải} của biểu đồ bên trái (độ chính xác cao, tiết kiệm nhiều FLOPs) và vùng
-\emph{dưới-phải} của biểu đồ bên phải (chi phí huấn luyện thấp, tiết kiệm nhiều FLOPs).
+\paragraph{Tiết kiệm FLOPs.}
+Mức tiết kiệm FLOPs dao động từ khoảng $18\%$ đến $88\%$ tùy theo thuật toán và mức sparsity.
+Các phương pháp unstructured (GraSP, IMP, SynFlow, Hybrid, Hybrid-Improve) đạt mức tiết kiệm FLOPs tăng gần tuyến tính theo sparsity của trọng số, mặc dù giá trị chính xác còn phụ thuộc vào phân bố sparsity theo từng layer (được phân tích ở Mục~\ref{sec:layerwise_sparsity}).
+Early-Bird có đặc tính FLOPs khác do pruning theo kênh làm giảm chiều rộng của các layer convolution; ngay cả ở $S=0.30$, nó đã loại bỏ khoảng $20\%$–$25\%$ FLOPs, nhưng phải đánh đổi bằng độ chính xác đã giảm.
 
-\paragraph{\textbf{Mức tiết kiệm FLOPs.}}
-Mức tiết kiệm FLOPs dao động từ khoảng $18\%$ đến $88\%$ giữa các thuật toán và các mức độ thưa.
-Các phương pháp không có cấu trúc (GraSP, IMP, SynFlow, Hybrid, Hybrid-Improve) có mức tiết
-kiệm FLOPs theo xu hướng tuyến tính với độ thưa trọng số, dù giá trị chính xác còn phụ thuộc
-vào phân bố độ thưa theo từng lớp.
-Early-Bird có dữ liệu FLOPs khác biệt vì tỉa kênh làm giảm độ rộng của các lớp convolution;
-ngay cả ở $S=0.30$, nó đã loại bỏ khoảng $20\%$--$25\%$ FLOPs, nhưng đổi lại độ chính xác đã
-bị suy giảm từ trước.
+\paragraph{Biên hiệu năng–hiệu quả.}
+Ở mức tiết kiệm FLOPs thấp đến trung bình ($\approx 20\%$–$50\%$), GraSP, Hybrid, và Hybrid-Improve tập trung gần đỉnh trục độ chính xác ($\approx 90\%$–$91\%$), cho thấy đây là các phương pháp hiệu quả nhất về độ chính xác trong vùng nén nhẹ.
+SynFlow thấp hơn một chút nhưng vẫn cạnh tranh.
+IMP cũng hoạt động tốt trong vùng này, nhưng mức tiết kiệm FLOPs tại $S=0.30$ của nó thấp hơn một chút do lịch pruning lặp tạo ra phân bố trọng số có nhiều tham số khác 0 hơn trên mỗi FLOP so với các phương pháp one-shot.
 
-\paragraph{\textbf{Biên hiệu quả--độ chính xác.}}
-Ở vùng tiết kiệm FLOPs thấp đến trung bình ($\approx 20\%$--$50\%$), GraSP, Hybrid và
-Hybrid-Improve tập trung gần đỉnh trục độ chính xác ($\approx 90\%$--$91\%$), cho thấy đây là
-những phương pháp hiệu quả nhất về mặt độ chính xác khi nén nhẹ.
-SynFlow nằm thấp hơn một chút nhưng vẫn có sự cạnh tranh.
+Ở mức tiết kiệm FLOPs cao ($>75\%$, tương ứng xấp xỉ $S=0.90$), khoảng cách độ chính xác giữa GraSP/Hybrid/Hybrid-Improve ($\approx 88.9\%$) và IMP/SynFlow ($\approx 86.7\%$–$86.8\%$) tăng lên khoảng $2$ điểm phần trăm.
+Điểm dữ liệu của Early-Bird trong vùng này ($\approx 69\%$ độ chính xác với $\approx 88\%$ FLOPs tiết kiệm) xác nhận rằng nó không phù hợp cho sparsity cực cao trên ResNet-20.
 
-Ở mức tiết kiệm FLOPs cao ($>75\%$, tương ứng gần đúng với $S=0.90$), khoảng cách độ chính xác
-giữa GraSP/Hybrid/Hybrid-Improve ($\approx 88.9\%$) và IMP/SynFlow ($\approx 86.7\%$--$86.8\%$)
-nới rộng ra khoảng $2$ điểm phần trăm.
-Điểm dữ liệu của Early-Bird ở vùng này ($\approx 69\%$ độ chính xác với khoảng $\approx 88\%$
-tiết kiệm FLOPs) xác nhận rằng phương pháp này không phù hợp cho mức độ thưa cực cao trên
-ResNet-20.
+\paragraph{Chi phí huấn luyện.}
+Biểu đồ bên phải cho thấy một đánh đổi rõ rệt.
+IMP là thuật toán tốn kém nhất ở mọi mức sparsity ($10^{4}$--$10^{5}$ giây tại $S=0.90$, tăng theo số vòng lặp), phản ánh chi phí của $10 \times 160 = 1600$ epoch tương đương theo cấu hình mặc định (\texttt{num\_iterations=10}, \texttt{epochs\_per\_iteration=160}).
 
-\paragraph{\textbf{Chi phí huấn luyện.}}
-Biểu đồ bên phải cho thấy một đánh đổi rất rõ rệt.
-IMP là thuật toán đắt nhất ở mọi mức độ thưa ($10^{4}$--$10^{5}$ giây cho $S=0.90$, tăng theo
-số vòng lặp), phản ánh chi phí của $10 \times 160 = 1600$ epoch-tương-đương theo cấu hình mặc
-định (\texttt{num\_iterations=10}, \texttt{epochs\_per\_iteration=160}).
-Hybrid và Hybrid-Improve nằm ở vùng chi phí trung gian ($\approx 7{,}000$--$10{,}000$ giây tại
-$S=0.60$--$S=0.90$), điều này được hợp lý hóa bởi thời gian fine-tuning kéo dài ở pha one-shot
-và phần tinh chỉnh lặp.
-GraSP và SynFlow là những phương pháp rẻ nhất trong nhóm phương pháp có ý nghĩa vì mask được
-tính trong một lượt forward--backward duy nhất (GraSP) hoặc qua cơ chế chấm điểm lặp không cần
-dữ liệu (SynFlow), sau đó chỉ cần một lần huấn luyện 160 epoch.
-Early-Bird đạt chi phí thấp nhờ dừng sớm pha huấn luyện dense và chỉ huấn luyện lại mạng con
-đã được phát hiện, nhưng sự tiết kiệm này phải trả giá bằng độ chính xác, đặc biệt ở mức độ
-thưa cao.
+Hybrid và Hybrid-Improve nằm ở mức chi phí trung bình ($\approx 7000$--$10000$ giây tại $S=0.60$--$S=0.90$), hợp lý do cần fine-tuning dài trong pha one-shot và refinement lặp.
 
-Phân tích này cho thấy Hybrid-Improve đem lại sự cân bằng tổng thể tốt nhất: nó đạt độ chính
-xác cao nhất hoặc đồng hạng cao nhất ở tất cả các mức độ thưa, trong khi chi phí huấn luyện
-dù cao hơn GraSP hay SynFlow, nhưng thấp hơn nhiều so với IMP và hoàn toàn hợp lý nếu xét đến
-mức tăng độ chính xác tại $S=0.90$.
+GraSP và SynFlow là các phương pháp rẻ nhất vì mask được tính trong một lần forward--backward (GraSP) hoặc qua quá trình scoring không cần dữ liệu (SynFlow), sau đó chỉ cần một lần huấn luyện 160 epoch.
 
-% ─────────────────────────────────────────────────────────────────────────────
-\section{Mẫu độ thưa theo từng lớp}
+Early-Bird đạt chi phí thấp bằng cách dừng huấn luyện dense sớm và chỉ huấn luyện lại subnetwork, nhưng sự tiết kiệm này phải đánh đổi bằng độ chính xác, đặc biệt ở sparsity cao.
+
+Phân tích cho thấy Hybrid-Improve đạt cân bằng tổng thể tốt nhất: độ chính xác cao nhất hoặc đồng cao nhất ở mọi mức sparsity, trong khi chi phí huấn luyện, dù cao hơn GraSP hoặc SynFlow, vẫn thấp hơn đáng kể so với IMP và tương xứng với lợi ích đạt được ở $S=0.90$.
+
+\section{Phân bố sparsity theo từng lớp}
 \label{sec:layerwise_sparsity}
+
+Các Hình~\ref{fig:heatmap_s03}, \ref{fig:heatmap_s06}, và \ref{fig:heatmap_s09} trình bày heatmap sparsity theo từng layer cho mỗi thuật toán tại $S=0.30$, $S=0.60$, và $S=0.90$.
+Các heatmap này cho thấy \emph{vị trí} mà mỗi thuật toán phân bổ ngân sách pruning và cung cấp giải thích cơ chế cho sự khác biệt về độ chính xác.
 
 \begin{figure}[ht]
 	\centering
 	\includegraphics[width=0.95\textwidth]{../Khoá_luận_tốt_nghiệp/image/heatmap_resnet20_cifar10_s0.3.png}
-	\caption{Heatmap độ thưa theo từng lớp của mỗi thuật toán tại $S=0.30$ trên ResNet-20 CIFAR-10.}
+	\caption{Phân bố sparsity theo từng layer trên ResNet-20 CIFAR-10 tại mức mục tiêu $S=0.30$.}
 	\label{fig:heatmap_s03}
 \end{figure}
+
 \begin{figure}[ht]
 	\centering
 	\includegraphics[width=0.95\textwidth]{../Khoá_luận_tốt_nghiệp/image/heatmap_resnet20_cifar10_s0.6.png}
-	\caption{Heatmap độ thưa theo từng lớp của mỗi thuật toán tại $S=0.60$ trên ResNet-20 CIFAR-10.}
+	\caption{Phân bố sparsity theo từng layer trên ResNet-20 CIFAR-10 tại mức mục tiêu $S=0.60$.}
 	\label{fig:heatmap_s06}
 \end{figure}
+
 \begin{figure}[ht]
 	\centering
 	\includegraphics[width=0.95\textwidth]{../Khoá_luận_tốt_nghiệp/image/heatmap_resnet20_cifar10_s0.9.png}
-	\caption{Heatmap độ thưa theo từng lớp của mỗi thuật toán tại $S=0.90$ trên ResNet-20 CIFAR-10.}
+	\caption{Phân bố sparsity theo từng layer trên ResNet-20 CIFAR-10 tại mức mục tiêu $S=0.90$.}
 	\label{fig:heatmap_s09}
 \end{figure}
 
-Các Hình~\ref{fig:heatmap_s03}, \ref{fig:heatmap_s06} và \ref{fig:heatmap_s09} cho thấy heatmap
-độ thưa theo từng lớp của mỗi thuật toán tại $S=0.30$, $S=0.60$ và $S=0.90$.
-Những heatmap này làm sáng tỏ \emph{thuật toán nào tỉa vào đâu} và cung cấp lời giải thích cơ
-chế cho các khác biệt về độ chính xác đã quan sát ở trên.
-
 \paragraph{IMP.}
-IMP áp dụng tỉa toàn cục theo độ lớn trọng số một cách lặp lại và tạo ra một phân bố độ thưa
-theo lớp tương đối \emph{đều}.
-Tại $S=0.30$, độ thưa từng lớp dao động từ khoảng $16.0\%$ đến $54.9\%$, trong đó khối
-convolution đầu tiên bị tỉa mạnh hơn đôi chút (ví dụ:
-\texttt{layer1.0.conv1}: $54.9\%$) so với các lớp sau.
-Điều này phản ánh hiện tượng đã biết rằng các lớp đầu của ResNet thường có nhiều kết nối dư
-thừa hơn khi chỉ xét độ lớn trọng số.
-Tại $S=0.90$, phân bố trở nên đồng đều hơn ($70\%$--$99\%$), với lớp tuyến tính cuối cùng giữ
-lại tương đối nhiều trọng số hơn (độ thưa $41.9\%$) — phù hợp với quan sát rằng các đầu phân
-loại rất nhạy cảm với việc bị tỉa quá mạnh.
+IMP áp dụng global magnitude pruning theo cách lặp và tạo ra phân bố sparsity tương đối \emph{đồng đều} giữa các layer.
+Tại $S=0.30$, sparsity từng layer nằm trong khoảng $\approx 16.0\%$ đến $\approx 54.9\%$, với layer đầu có xu hướng bị prune nhiều hơn.
+Tại $S=0.90$, phân bố trở nên đồng đều hơn ($70\%$–$99\%$), trong khi layer fully-connected cuối giữ lại nhiều trọng số hơn.
 
 \paragraph{GraSP.}
-GraSP tạo ra một phân bố độ thưa rất \emph{đồng đều} trên toàn bộ các lớp và ở mọi mức độ thưa.
-Tại $S=0.30$, độ thưa trên từng lớp tập trung chặt trong khoảng $\approx 27\%$ đến $\approx
-56\%$.
-Tính đồng đều này là hệ quả trực tiếp của tiêu chí bảo toàn tín hiệu gradient: GraSP chấm điểm
-mỗi trọng số dựa trên đóng góp của nó vào chuẩn gradient, và vì ResNet-20 là một kiến trúc cân
-đối, nên các điểm quan trọng được phân bố tương đối đều giữa các lớp.
-Sự phân bổ đồng đều này ngăn không cho một lớp nào trở thành nút cổ chai, và điều đó có thể
-giải thích một phần vì sao GraSP vẫn đạt độ chính xác cạnh tranh ở $S=0.90$ dù chỉ là một
-phương pháp one-shot, một lượt.
+GraSP tạo ra phân bố sparsity rất đồng đều trên tất cả các layer và mọi mức sparsity.
+Điều này đến từ tiêu chí bảo toàn gradient, khiến các điểm số quan trọng phân bố đều.
 
 \paragraph{SynFlow.}
-SynFlow thể hiện phân bố độ thưa \emph{không đồng đều} nhất và nhạy với kiến trúc nhất.
-Tại $S=0.30$, các lớp convolution đầu gần như không bị tỉa (\texttt{conv1}: $0.7\%$,
-\texttt{layer1.0.conv1}: $2.8\%$), trong khi các kết nối shortcut lại bị tỉa cực mạnh
-(\texttt{layer3.0.shortcut.0}: $94.4\%$).
-Tại $S=0.60$, lớp shortcut đạt $99.9\%$ độ thưa, và tại $S=0.90$ thì chạm $100\%$, nghĩa là
-toàn bộ nhánh shortcut bị loại bỏ.
-Mẫu này phản ánh bản chất không cần dữ liệu của SynFlow và việc nó dựa trên $\ell_1$-path norm:
-các lớp shortcut (skip connection) có ít tham số hơn và tham gia vào ít đường đi hơn trong mạng,
-nên điểm SynFlow của chúng thường thấp hơn trên mỗi tham số.
-Việc dồn phần lớn độ thưa vào các lớp shortcut là có hại vì skip connection chính là thành
-phần kiến trúc giúp ResNet huấn luyện được ở độ sâu lớn; loại bỏ chúng đồng nghĩa làm suy giảm
-mạng residual thành một mạng thường.
-Điểm yếu về cấu trúc này có lẽ giải thích tại sao SynFlow giảm độ chính xác mạnh hơn GraSP ở
-$S=0.90$, dù cả hai đều là các phương pháp chấm điểm tại thời điểm khởi tạo và one-shot.
+SynFlow có phân bố rất \emph{không đồng đều} và nhạy với kiến trúc.
+Các layer đầu gần như không bị prune, trong khi các shortcut bị prune cực mạnh, dẫn đến phá vỡ skip connection.
 
 \paragraph{Hybrid và Hybrid-Improve.}
-Hai biến thể hybrid đều tạo ra một phân bố độ thưa \emph{bảo vệ các lớp đầu} và
-\emph{tập trung tỉa vào các lớp sâu hơn}, đặc biệt là các khối residual cuối và các tầng
-convolution cuối.
-Tại $S=0.30$, \texttt{conv1} chỉ có độ thưa $6.0\%$ (Hybrid) và $5.6\%$ (Hybrid-Improve),
-trong khi \texttt{layer3.2.conv2} có độ thưa lần lượt là $55.2\%$ và $63.8\%$.
-Mẫu phân bố tăng dần này phù hợp với kết quả phổ biến trong văn liệu về pruning rằng các lớp
-đầu mã hóa các đặc trưng thấp cấp được chia sẻ cho mọi lớp nên nhạy cảm hơn với việc tỉa, trong
-khi các lớp sau học các biểu diễn cao cấp hơn, đặc thù theo lớp, và vì thế dư thừa hơn.
-Việc Hybrid-Improve tập trung nhiều hơn một chút ngân sách tỉa vào các lớp sâu so với Hybrid
-truyền thống (ví dụ tại $S=0.30$: khối residual cuối nhận $63.8\%$ so với $55.2\%$) cho thấy
-tỷ lệ one-shot thích nghi tính từ độ nhạy Fisher đã xác định đúng những vùng có thể nén mạnh hơn
-trong mạng.
+Hai phương pháp này bảo vệ layer đầu và tập trung pruning vào layer sâu hơn.
+Điều này phù hợp với quan sát rằng layer đầu chứa đặc trưng cơ bản, trong khi layer sau dư thừa hơn.
 
 \paragraph{Early-Bird.}
-Là một phương pháp tỉa kênh có cấu trúc, heatmap của Early-Bird có cách diễn giải khác hẳn.
-Các giá trị theo từng lớp biểu diễn tỷ lệ \emph{kênh} (không phải từng weight) bị tỉa.
-Mẫu này khá thất thường và được điều khiển bởi các hệ số co giãn Batch Normalisation học được
-trong giai đoạn huấn luyện sớm: một số lớp bị tỉa kênh rất mạnh
-(\texttt{layer1.2.conv1}: $81.2\%$ tại $S=0.30$; $93.8\%$ tại $S=0.60$;
-\texttt{layer3.0.conv2}: $98.4\%$ tại $S=0.90$), trong khi những lớp khác bị ảnh hưởng rất ít.
-Sự bất ổn của các điểm số dựa trên BN này, được rút ra từ một mô hình chưa học đủ, dẫn đến các
-lựa chọn cấu trúc kém tối ưu và càng trở nên tốn kém khi độ thưa mục tiêu tăng lên, qua đó xác
-nhận hiện tượng sụp đổ độ chính xác quan sát ở $S=0.90$.
+Là phương pháp structured pruning, giá trị heatmap biểu diễn tỷ lệ channel bị loại bỏ.
+Phân bố không ổn định do phụ thuộc vào BN scale từ mô hình chưa huấn luyện đầy đủ.
 
-% \paragraph{\textbf{Độ trễ suy luận và thông lượng.}}
+\section{Độ trễ suy luận và thông lượng}
+\label{sec:latency_throughput}
 
-% \begin{figure}[ht]
-% 	\centering
-% 	\includegraphics[width=0.7\textwidth]{../Khoá_luận_tốt_nghiệp/image/latency_resnet20_cifar10.png}
-% 	\caption{So sánh độ trễ suy luận (ms/batch) giữa mô hình dày đặc và mô hình sau tỉa của từng thuật toán ở các mức độ thưa trên ResNet-20 CIFAR-10.}
-% 	\label{fig:latency}
-% \end{figure}
-% \begin{figure}[ht]
-% 	\centering
-% 	\includegraphics[width=0.7\textwidth]{../Khoá_luận_tốt_nghiệp/image/throughput_resnet20_cifar10.png}
-% 	\caption{So sánh thông lượng (images/sec) giữa mô hình dày đặc và mô hình sau tỉa của từng thuật toán ở các mức độ thưa trên ResNet-20 CIFAR-10.}
-% 	\label{fig:throughput}
-% \end{figure}
+Kết quả cho thấy rằng với tất cả các phương pháp unstructured, độ trễ suy luận và throughput gần như không thay đổi.
 
-% Các Hình~\ref{fig:latency} và~\ref{fig:throughput} so sánh độ trễ suy luận (ms/batch) và
-% thông lượng (images/sec) của mô hình dày đặc và mô hình sau tỉa của từng thuật toán ở mỗi
-% mức độ thưa.
-% Quan sát nổi bật nhất là, với tất cả các phương pháp tỉa \emph{không có cấu trúc}
-% (GraSP, SynFlow, IMP, Hybrid, Hybrid-Improve), độ trễ và thông lượng của mô hình sau tỉa
-% về cơ bản là \emph{không đổi} so với baseline dày đặc.
+Điều này có hai nguyên nhân chính. Thứ nhất, GPU thường xử lý các tensor ở dạng dense. Thứ hai, sparsity không làm giảm số phép toán thực tế nếu không có kernel chuyên biệt để khai thác cấu trúc thưa.
 
-% Kết quả này là điều có thể dự đoán được và không phải là lỗi của thí nghiệm: phần cứng GPU
-% thông thường vận hành trên các phép toán tensor dày đặc, và độ thưa không có cấu trúc — tức là
-% các trọng số bằng 0 bị rải ngẫu nhiên trong ma trận trọng số — sẽ không tự động chuyển thành
-% việc giảm số phép tính floating-point nếu không dùng các kernel nhân ma trận thưa chuyên dụng
-% (ví dụ CUDA sparse BLAS hoặc các bộ tăng tốc sparse do nhà cung cấp triển khai).
-% Trong thiết lập thực nghiệm này, suy luận được thực hiện bằng PyTorch tiêu chuẩn với các
-% kernel dày đặc thông thường; các mask thưa được áp dụng theo từng phần tử (Hadamard product)
-% nhưng kích thước tensor không thay đổi, nên phần cứng vẫn thực hiện số phép multiply-accumulate
-% như cũ bất kể có bao nhiêu phần tử bằng 0 trên phương diện toán học.
+Hệ quả là mức giảm FLOPs trong các thí nghiệm này chủ yếu mang tính lý thuyết, chưa chuyển hóa thành lợi ích rõ rệt về latency trên phần cứng hiện tại.
 
-% Hệ quả thực tiễn là các mức tiết kiệm FLOPs và độ thưa được báo cáo ở
-% Các Mục~\ref{sec:accuracy_vs_sparsity}--\ref{sec:layerwise_sparsity} chỉ là
-% \emph{tiết kiệm lý thuyết}.
-% Để biến chúng thành giảm độ trễ thực sự trong thời gian chạy, cần một trong các điều kiện sau:
-% (i) tỉa có cấu trúc để loại bỏ toàn bộ kênh hoặc filter (như Early-Bird), (ii) phần cứng có hỗ
-% trợ sparse, hoặc (iii) suy luận theo định dạng sparse ở mức kernel (ví dụ dùng CSR/CSC với
-% sparse GEMM).
+\paragraph{Early-Bird.}
+Early-Bird có giảm độ trễ thực nhờ giảm số channel, nhưng hiệu quả này không ổn định do phân bố pruning không cân bằng giữa các layer.
 
-% \paragraph{Phân bố độ trễ của Early-Bird.}
-% Ngược lại, tỉa kênh của Early-Bird thực sự tạo ra các lớp convolution hẹp hơn về mặt vật lý,
-% và mô hình dày đặc trong pipeline Early-Bird (tức là mô hình \emph{trước} khi ticket được phát
-% hiện) có độ trễ thấp hơn các baseline dày đặc của các phương pháp không có cấu trúc, vì
-% regularisation theo chuẩn $\ell_1$ trên BN đã ngầm nén số kênh trong quá trình huấn luyện.
-% Tuy nhiên, việc xem xét Hình~\ref{fig:latency} cho thấy mức giảm độ trễ từ dense sang pruned
-% mà Early-Bird đạt được là khiêm tốn và không nhất quán giữa các mức độ thưa, đặc biệt tại
-% $S=0.60$ và $S=0.90$, nơi thông lượng của mô hình sau tỉa không phải lúc nào cũng vượt quá
-% các mô hình dày hơn thuộc nhóm phương pháp không có cấu trúc, dù FLOPs ít hơn.
-% Điều này phù hợp với hiện tượng đã biết là \emph{mất cân bằng kênh}: khi một số lớp bị tỉa
-% xuống còn rất ít kênh trong khi các lớp khác vẫn gần như đầy đủ, mức sử dụng GPU theo từng lớp
-% dao động mạnh, và thời gian suy luận toàn mạng bị chi phối bởi lớp còn lại rộng nhất chứ không
-% phải bởi độ rộng trung bình.
+\paragraph{Triển khai thực tế.}
+Để có cải thiện latency rõ rệt, cần structured pruning hoặc phần cứng có hỗ trợ tính toán sparse.
 
-% \paragraph{Hàm ý triển khai thực tế.}
-% Đối với triển khai trên phần cứng GPU thông thường, các kết quả cho thấy rằng các phương pháp
-% tỉa có cấu trúc (hoặc các phương pháp lai structured/unstructured) là cần thiết để đạt được
-% lợi ích độ trễ trong thực tế.
-% Trong những kịch bản mà độ thưa có thể được khai thác (ví dụ thiết bị biên có đơn vị tính toán
-% thưa, hoặc suy luận trên CPU theo batch với các kernel sparse AVX-512), các phương pháp
-% không có cấu trúc — đặc biệt là Hybrid-Improve tại $S=0.90$, với độ chính xác $\approx 88.9\%$
-% và mức giảm FLOPs lý thuyết khoảng $\sim 90\%$ — sẽ rất đáng cân nhắc.
-
-% ─────────────────────────────────────────────────────────────────────────────
-\section{Tổng kết và Thảo luận}
+\section{Tóm tắt và thảo luận}
 \label{sec:summary}
-% ─────────────────────────────────────────────────────────────────────────────
 
-Bảng~\ref{tab:summary} tổng hợp các chỉ số chính trên tất cả thuật toán và mức độ thưa.
+Các kết luận chính có thể tóm lược như sau:
 
-\begin{table}[h]
-\centering
-\caption{Tổng hợp kết quả trên ResNet-20 / CIFAR-10. Mức giảm độ chính xác được tính so với
-baseline dày đặc ($\approx 91.5\%$). Chi phí huấn luyện là thời gian chạy xấp xỉ tính bằng giây.}
-\label{tab:summary}
-\resizebox{\textwidth}{!}{%
-\begin{tabular}{llccccc}
-\toprule
-\textbf{Độ thưa} & \textbf{Thuật toán} & \textbf{Độ chính xác (\%)} & \textbf{Giảm ĐC (\%)} & \textbf{FLOPs tiết kiệm (\%)} & \textbf{Chi phí huấn luyện (s)} & \textbf{Lợi ích độ trễ thực} \\
-\midrule
-\multirow{6}{*}{$S=0.30$}
- & IMP            & $\approx 91.2$ & $\approx 0.3$ & $\approx 25$  & rất cao     & Không (không có cấu trúc) \\
- & Hybrid-Improve & $\approx 91.0$ & $\approx 0.5$ & $\approx 24$  & trung bình   & Không (không có cấu trúc) \\
- & Hybrid         & $\approx 90.2$ & $\approx 1.4$ & $\approx 24$  & trung bình   & Không (không có cấu trúc) \\
- & GraSP          & $\approx 90.1$ & $\approx 1.4$ & $\approx 23$  & thấp         & Không (không có cấu trúc) \\
- & SynFlow        & $\approx 90.1$ & $\approx 1.3$ & $\approx 22$  & thấp         & Không (không có cấu trúc) \\
- & Early-Bird     & $\approx 89.4$ & $\approx 2.8$ & $\approx 20$  & thấp         & Có phần nào (có cấu trúc) \\
-\midrule
-\multirow{6}{*}{$S=0.60$}
- & Hybrid-Improve & $\approx 90.8$ & $\approx 0.8$ & $\approx 50$  & trung bình   & Không (không có cấu trúc) \\
- & IMP            & $\approx 90.5$ & $\approx 1.0$ & $\approx 49$  & rất cao     & Không (không có cấu trúc) \\
- & Hybrid         & $\approx 90.3$ & $\approx 1.7$ & $\approx 50$  & trung bình   & Không (không có cấu trúc) \\
- & SynFlow        & $\approx 90.0$ & $\approx 1.5$ & $\approx 49$  & thấp         & Không (không có cấu trúc) \\
- & GraSP          & $\approx 90.1$ & $\approx 2.0$ & $\approx 50$  & thấp         & Không (không có cấu trúc) \\
- & Early-Bird     & $\approx 87.7$ & $\approx 4.5$ & $\approx 58$  & thấp         & Có phần nào (có cấu trúc) \\
-\midrule
-\multirow{6}{*}{$S=0.90$}
- & Hybrid-Improve & $\approx 88.9$ & $\approx 3.1$ & $\approx 83$  & trung bình-cao & Không (không có cấu trúc) \\
- & Hybrid         & $\approx 88.9$ & $\approx 3.5$ & $\approx 83$  & trung bình-cao & Không (không có cấu trúc) \\
- & GraSP          & $\approx 88.9$ & $\approx 5.0$ & $\approx 82$  & thấp         & Không (không có cấu trúc) \\
- & IMP            & $\approx 86.8$ & $\approx 5.2$ & $\approx 80$  & rất cao     & Không (không có cấu trúc) \\
- & SynFlow        & $\approx 86.7$ & $\approx 5.8$ & $\approx 81$  & thấp         & Không (không có cấu trúc) \\
- & Early-Bird     & $\approx 69.0$ & $\approx 23$  & $\approx 88$  & thấp         & Có phần nào (có cấu trúc) \\
-\bottomrule
-\end{tabular}
-}
-\end{table}
+\paragraph{Hybrid-Improve tốt nhất tổng thể.}
+Hybrid-Improve đạt mức giảm độ chính xác thấp nhất hoặc gần thấp nhất ở mọi mức sparsity, nên có thể xem là phương pháp cân bằng nhất giữa hiệu năng và độ bền vững.
 
-\noindent
-Tổng hợp các kết quả trên mọi phương diện, có thể rút ra một số kết luận ở mức cao như sau.
+\paragraph{GraSP tối ưu chi phí.}
+GraSP cho hiệu năng gần tương đương với một số phương pháp mạnh hơn, nhưng với chi phí huấn luyện thấp hơn.
 
-\paragraph{Hybrid-Improve là thuật toán tổng thể tốt nhất.}
-Trên mọi mức độ thưa, Hybrid-Improve đạt mức giảm độ chính xác thấp nhất hoặc đồng thấp nhất,
-vượt qua cả IMP dù IMP tốn kém tính toán hơn rất nhiều tại $S=0.90$.
-Tỷ lệ one-shot thích nghi, distillation tri thức và lịch warm-up đều góp phần tạo nên kết quả
-này: tỷ lệ dựa trên độ nhạy Fisher đảm bảo bước tỉa lớn ban đầu không vượt quá năng lực hồi
-phục của mạng; hàm KD ở pha one-shot giữ mô hình tỉa bám gần mô hình giáo viên dày đặc; và
-warm-up learning rate ở pha lặp giúp tránh trạng thái bão hòa gradient sau mỗi bước tỉa tăng
-dần.
+\paragraph{IMP không tương xứng chi phí.}
+IMP tiêu tốn nhiều tài nguyên hơn đáng kể nhưng không tạo ra ưu thế vượt trội tương ứng trên kiến trúc này.
 
-\paragraph{GraSP mang lại cân bằng chi phí--độ chính xác tốt nhất cho người thực hành.}
-Dù Hybrid-Improve đạt độ chính xác nhỉnh hơn một chút tại $S=0.90$ ($88.9\%$ so với
-$88.9\%$, khác biệt không đáng kể về mặt thống kê), GraSP đạt độ chính xác tương đương tại
-$S=0.90$ với chi phí huấn luyện thấp hơn rất nhiều.
-Với các ứng dụng mà ngân sách huấn luyện là ràng buộc chính — chẳng hạn tỉa mô hình đã huấn
-luyện sẵn trong môi trường sản xuất với áp lực thời gian — phương pháp chấm điểm tín hiệu
-gradient một lượt của GraSP, sau đó chỉ cần một lần huấn luyện, là một lựa chọn hấp dẫn.
+\paragraph{SynFlow có vấn đề cấu trúc.}
+SynFlow không gây collapse layer rõ rệt, nhưng có xu hướng làm suy yếu các skip connection.
 
-\paragraph{Chi phí cao của IMP không tương xứng với độ chính xác.}
-Mặc dù có nền tảng lý thuyết vững chắc với vai trò là phương pháp kinh điển để tìm Lottery
-Tickets, IMP vẫn bị Hybrid-Improve và GraSP vượt qua tại $S=0.90$ trên kiến trúc này, trong
-khi lại tiêu tốn chi phí huấn luyện lớn hơn theo cấp số nhân.
-Kết quả này phù hợp với văn liệu gần đây cho rằng lợi thế của IMP suy giảm trên các kiến trúc
-nhỏ, nông, nơi mà ở mức độ thưa $S=0.90$ thì mặt phẳng trọng số đã quá thưa để chu trình
-prune--retrain--rewind tạo ra subnet tốt hơn các phương pháp thay thế.
+\paragraph{Early-Bird không phù hợp sparsity cao.}
+Early-Bird không phù hợp khi sparsity tăng cao vì độ chính xác suy giảm rất mạnh.
 
-\paragraph{Đảm bảo không sụp đổ theo lớp của SynFlow không đủ để ngăn suy giảm độ chính xác.}
-Tính chất lý thuyết của SynFlow là ngăn sụp đổ theo lớp (layer collapse) rõ ràng vẫn được bảo
-toàn trong các heatmap — không có lớp nào bị triệt tiêu hoàn toàn, ngoại trừ các lớp shortcut,
-vốn bị hệ thống chấm điểm của nó đánh giá thấp một cách có hệ thống.
-Tuy nhiên, việc dồn gần như toàn bộ phần loại bỏ vào các lớp skip-connection ở độ thưa cực cao
-($S=0.90$) tạo ra một dạng \emph{sụp đổ cấu trúc ở mức kết nối}, ngay cả khi không có collapse
-theo lớp.
-Điều này cho thấy tiêu chí tránh sụp đổ theo lớp, dù cần thiết, vẫn chưa đủ để đảm bảo tính
-toàn vẹn kiến trúc trong các mạng residual.
+\paragraph{Unstructured không cải thiện latency thực tế.}
+Các phương pháp unstructured không mang lại cải thiện latency thực tế đáng kể trên phần cứng hiện tại.
 
-\paragraph{Early-Bird không phù hợp với mức độ thưa cao trên ResNet-20.}
-Early-Bird được thiết kế và kiểm chứng chủ yếu trên các kiến trúc kiểu VGG và các ResNet lớn
-hơn (ResNet-18, ResNet-50), nơi tỉa kênh ít có khả năng tạo ra các lớp quá hẹp.
-Trên ResNet-20 nhỏ gọn, vốn đã vận hành gần với ngưỡng số kênh tối thiểu khả dụng, việc tỉa
-kênh quá mạnh gây sụp đổ độ chính xác nghiêm trọng tại $S=0.90$.
-Early-Bird chỉ nên được xem xét ở mức độ thưa thấp đến trung bình ($\leq 0.50$) trên kiến
-trúc này, hoặc dành cho các mạng rộng hơn nơi lợi thế tiết kiệm chi phí huấn luyện của nó có
-thể được khai thác đầy đủ.
+\section{ResNet-50 / CIFAR-10 và so sánh liên kiến trúc}
+\label{sec:resnet50}
 
-\paragraph{Độ thưa không có cấu trúc không đem lại lợi ích độ trễ thực sự trên GPU tiêu chuẩn.}
-Tất cả các phương pháp không có cấu trúc đều tạo ra các mô hình sau tỉa có độ trễ và thông lượng
-suy luận gần như không khác gì mô hình dày đặc trên phần cứng GPU thông thường.
-Đây là một hạn chế thực tế quan trọng: mức giảm FLOPs lý thuyết lên tới $83\%$ mà Hybrid-Improve
-đạt được tại $S=0.90$ chỉ có ý nghĩa nếu có phần cứng hoặc phần mềm hỗ trợ sparse để chuyển hóa
-thành tăng tốc thực sự.
-Các công việc tương lai nên đánh giá những phương pháp này trong các framework suy luận sparse
-kernel (ví dụ NVIDIA cuSPARSE, Torch Sparse) hoặc trên phần cứng được thiết kế riêng cho tính
-toán thưa (ví dụ Cerebras, SambaNova, hoặc các NPU ARM Ethos-N có hỗ trợ structured sparsity).
+\subsection{Kết quả kém hơn có phải là điều kỳ vọng?}
+
+Có, và đây là kết quả khá hợp lý.
+
+Nguyên nhân chính là ResNet-50 vốn được thiết kế cho ImageNet, trong khi CIFAR-10 nhỏ hơn nhiều nên mô hình có xu hướng bị overparameterization.
+
+Hệ quả của thiết lập này là loss landscape thường phẳng hơn và việc đánh giá độ quan trọng của tham số trở nên khó hơn. Đồng thời, pruning trong bối cảnh này phần nào đóng vai trò như một dạng regularization.
+
+\subsection{Kết quả chính}
+
+\begin{itemize}
+	\item Hybrid-Improve vượt baseline tại $S=0.30$.
+	\item Thứ hạng nhìn chung được giữ nguyên tại $S=0.60$.
+	\item IMP kém hơn ở mức $S=0.90$.
+	\item SynFlow tệ nhất do làm suy yếu skip connection.
+	\item Hybrid cho kết quả ổn định nhất.
+\end{itemize}
+
+\subsection{Tổng kết liên kiến trúc}
+
+\begin{itemize}
+	\item Hybrid và Hybrid-Improve nhìn chung là các phương pháp robust hơn.
+	\item GraSP có xu hướng cải thiện khi mô hình lớn hơn.
+	\item IMP phụ thuộc khá mạnh vào cấu hình và lịch huấn luyện.
+	\item SynFlow dễ bị lệch do bias cấu trúc.
+\end{itemize}
+
+Kết luận, ResNet-50/CIFAR-10 là một bài test khó nhưng hữu ích, vì nó làm lộ rõ bias của từng thuật toán pruning trên một kiến trúc lớn hơn.

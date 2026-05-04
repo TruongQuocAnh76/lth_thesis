@@ -85,6 +85,62 @@ def _convert_to_serializable(obj):
         return obj
 
 
+def _load_dense_run(
+    run_dir: str | Path,
+) -> Tuple[dict, Optional[dict], Optional[float]]:
+    """Load a dense run's final/initial weights and accuracy, if available."""
+    run_path = Path(run_dir)
+    final_model_path = run_path / "final_model.pt"
+    if not final_model_path.is_file():
+        raise FileNotFoundError(
+            f"Dense run missing final_model.pt at: {final_model_path}"
+        )
+
+    final_payload = torch.load(
+        final_model_path, map_location="cpu", weights_only=False
+    )
+    dense_state = (
+        final_payload.get("state_dict")
+        if isinstance(final_payload, dict) and "state_dict" in final_payload
+        else final_payload
+    )
+    if any(key.startswith("module.") for key in dense_state.keys()):
+        dense_state = {
+            key.replace("module.", "", 1): value
+            for key, value in dense_state.items()
+        }
+
+    initial_state = None
+    initial_model_path = run_path / "initial_model.pt"
+    if initial_model_path.is_file():
+        initial_payload = torch.load(
+            initial_model_path, map_location="cpu", weights_only=False
+        )
+        initial_state = (
+            initial_payload.get("state_dict")
+            if isinstance(initial_payload, dict)
+            and "state_dict" in initial_payload
+            else initial_payload
+        )
+        if any(key.startswith("module.") for key in initial_state.keys()):
+            initial_state = {
+                key.replace("module.", "", 1): value
+                for key, value in initial_state.items()
+            }
+
+    dense_test_acc = None
+    results_path = run_path / "results.json"
+    if results_path.is_file():
+        with open(results_path, "r") as handle:
+            dense_results = json.load(handle)
+        final_results = dense_results.get("final_results", {})
+        dense_test_acc = final_results.get("dense_test_accuracy")
+        if dense_test_acc is None:
+            dense_test_acc = final_results.get("final_test_accuracy")
+
+    return dense_state, initial_state, dense_test_acc
+
+
 # =========================================================================
 # Early Stopper
 # =========================================================================
@@ -743,6 +799,8 @@ def hybrid_pruning(
     checkpoint_interval: int = 1,
     time_limit_seconds: Optional[float] = None,
     resume_from: Optional[str] = None,
+    # -- Dense warm-start -----------------------------------------------
+    dense_run_dir: Optional[str] = None,
     # -- Results saving ---------------------------------------------------
     save_dir: Optional[str] = "./results",
     # -- Performance optimizations ----------------------------------------
@@ -828,6 +886,10 @@ def hybrid_pruning(
         resume_from: Path to a checkpoint file (``*.pt``) written by
             a previous run.  The experiment resumes from the saved
             phase and step.
+        dense_run_dir: Optional path to a dense run directory containing
+            ``final_model.pt`` (and optionally ``initial_model.pt`` and
+            ``results.json``). When provided, initial training is skipped
+            and pruning starts from the dense model.
 
     Returns:
         Dictionary containing:
@@ -849,6 +911,8 @@ def hybrid_pruning(
             f"Invalid iter_scheduler_type='{iter_scheduler_type}'. "
             f"Choose from {sorted(valid_scheduler_types)}"
         )
+    if resume_from is not None and dense_run_dir is not None:
+        raise ValueError("resume_from and dense_run_dir are mutually exclusive")
 
     # Auto-select iterative step if not provided
     if iterative_step is None:
@@ -899,6 +963,7 @@ def hybrid_pruning(
         "kd_temperature": kd_temperature,
         "kd_lambda": kd_lambda,
         "iter_lr_rewind_warmup_epochs": iter_lr_rewind_warmup_epochs,
+        "dense_run_dir": dense_run_dir,
     }
 
     results: Dict[str, Any] = {"config": config, "phases": []}
@@ -1046,6 +1111,23 @@ def hybrid_pruning(
     # Resume from checkpoint (if provided)
     # ------------------------------------------------------------------ #
     skip_initial_training = False
+
+    if dense_run_dir is not None:
+        dense_state, dense_init_state, dense_acc = _load_dense_run(dense_run_dir)
+        raw_model.load_state_dict(dense_state)
+        model.to(device)
+        if dense_init_state is not None:
+            initial_model_state_dict = copy.deepcopy(dense_init_state)
+        results["initial_training"] = {
+            "train_losses": [],
+            "train_accs": [],
+            "test_losses": [],
+            "test_accs": [],
+            "final_test_acc": float(dense_acc) if dense_acc is not None else 0.0,
+        }
+        init_test_acc = results["initial_training"]["final_test_acc"]
+        skip_initial_training = True
+        print(f"Loaded dense run from: {dense_run_dir}")
 
     if resume_from is not None:
         ckpt = load_hybrid_checkpoint(resume_from, verbose=verbose)
@@ -1237,6 +1319,34 @@ def hybrid_pruning(
         from src.train import train_epochs  # ensure import is available
         # No teacher available when resuming; KD is skipped gracefully
         teacher_model = None
+        if dense_run_dir is not None and use_kd:
+            teacher_model = copy.deepcopy(raw_model).to(device)
+            teacher_model.eval()
+            print(f"  KD teacher snapshot loaded ({device}).")
+
+        if dense_run_dir is not None and use_fisher_adaptive_ratio:
+            fisher_trace = _compute_fisher_trace(
+                raw_model, train_loader, device,
+                num_batches=fisher_num_batches,
+            )
+            ref = fisher_sensitivity * 1e-3
+            ratio_raw = 0.8 - 0.3 * torch.sigmoid(
+                torch.tensor(math.log(max(fisher_trace, 1e-12) / ref))
+            ).item()
+            oneshot_ratio = float(np.clip(ratio_raw, 0.50, 0.80))
+            print(f"  Fisher trace: {fisher_trace:.6f}  →  "
+                  f"adaptive oneshot_ratio = {oneshot_ratio:.3f}")
+            scheduler = HybridPruningScheduler(
+                target=target_sparsity,
+                oneshot_ratio=oneshot_ratio,
+                iterative_step=iterative_step,
+            )
+            steps = scheduler.get_steps()
+            config["oneshot_ratio"] = oneshot_ratio
+            config["pruning_steps"] = steps
+            config["num_pruning_phases"] = len(steps)
+            config["fisher_trace"] = fisher_trace
+            print(f"  Rebuilt schedule: {len(steps)-1} iterative steps.")
 
     # ------------------------------------------------------------------ #
     # Pruning loop (one-shot + iterative steps)
