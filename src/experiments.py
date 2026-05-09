@@ -413,21 +413,45 @@ class IMPExperiment:
         best_model_state_dict = None
         resume_ckpt = None
 
-        if self.resume_from and Path(self.resume_from).is_file():
-            resume_ckpt = self._load_checkpoint(self.resume_from)
-            initial_state_dict = copy.deepcopy(resume_ckpt['initial_state_dict'])
-            self.initial_model_state_dict = copy.deepcopy(initial_state_dict)
-            masks = self._masks_to_numpy(resume_ckpt['masks'])
-            start_iteration = int(resume_ckpt.get('iteration', 0))
-            start_epoch = int(resume_ckpt.get('epoch', -1)) + 1
-            prior_training_seconds = float(
-                resume_ckpt.get('elapsed_training_seconds', 0.0)
-            )
-            iteration_history = copy.deepcopy(
-                resume_ckpt.get('iteration_history', self._empty_iteration_history())
-            )
-            best_test_acc = float(
-                resume_ckpt.get(
+        if self.resume_from:
+            resume_path = Path(self.resume_from).expanduser().resolve()
+            
+            # Check if resume_from is a dense result directory
+            # Dense directories have results.json and final_model.pt
+            if resume_path.is_dir() and (resume_path / "results.json").is_file() and (resume_path / "final_model.pt").is_file():
+                print(f"Detected dense experiment directory at {resume_path}")
+                print("Creating IMP checkpoint from dense baseline internally...")
+                # Create checkpoint internally
+                temp_ckpt = _create_imp_checkpoint_dict_from_dense(
+                    dense_result_dir=resume_path,
+                    target_sparsity=self.target_sparsity,
+                    num_iterations=self.num_iterations,
+                    use_global_pruning=self.use_global_pruning,
+                    model_name=self.model_name,
+                    dataset_name=self.dataset_name,
+                    seed=self.seed,
+                )
+                resume_ckpt = temp_ckpt
+            elif resume_path.is_file():
+                # Standard checkpoint file
+                resume_ckpt = self._load_checkpoint(resume_path)
+            else:
+                raise ValueError(f"Resume path not found: {resume_path}")
+            
+            if resume_ckpt:
+                initial_state_dict = copy.deepcopy(resume_ckpt['initial_state_dict'])
+                self.initial_model_state_dict = copy.deepcopy(initial_state_dict)
+                masks = self._masks_to_numpy(resume_ckpt['masks'])
+                start_iteration = int(resume_ckpt.get('iteration', 0))
+                start_epoch = int(resume_ckpt.get('epoch', -1)) + 1
+                prior_training_seconds = float(
+                    resume_ckpt.get('elapsed_training_seconds', 0.0)
+                )
+                iteration_history = copy.deepcopy(
+                    resume_ckpt.get('iteration_history', self._empty_iteration_history())
+                )
+                best_test_acc = float(
+                    resume_ckpt.get(
                     'best_test_acc',
                     max(iteration_history.get('test_accs', []), default=float("-inf")),
                 )
@@ -3606,6 +3630,142 @@ def _save_earlybird_finetune_csv(path: Path, history: Dict):
                 ])
 
 
+def _create_imp_checkpoint_dict_from_dense(
+    dense_result_dir: Path,
+    target_sparsity: float,
+    num_iterations: int,
+    use_global_pruning: bool,
+    model_name: str,
+    dataset_name: str,
+    seed: int,
+) -> Dict[str, Any]:
+    """Create an IMP checkpoint dictionary from a dense experiment result.
+    
+    Internal helper used by IMPExperiment to handle --resume_from pointing
+    to a dense result directory.
+    
+    Args:
+        dense_result_dir: Path to dense experiment result directory
+        target_sparsity: Target final sparsity for IMP
+        num_iterations: Total IMP iterations
+        use_global_pruning: Global vs layerwise pruning
+        model_name: Model architecture
+        dataset_name: Dataset name
+        seed: Random seed
+    
+    Returns:
+        Checkpoint dictionary that can be loaded by IMP
+    """
+    dense_dir = Path(dense_result_dir).expanduser().resolve()
+    
+    # Load dense experiment metadata and model
+    results_path = dense_dir / "results.json"
+    final_model_path = dense_dir / "final_model.pt"
+    
+    for path in (results_path, final_model_path):
+        if not path.is_file():
+            raise ValueError(f"Missing file in dense result: {path}")
+    
+    with open(results_path, "r") as f:
+        dense_results = json.load(f)
+    
+    # Load the trained dense model
+    dense_state_dict = torch.load(final_model_path, map_location="cpu", weights_only=False)
+    if isinstance(dense_state_dict, dict) and "state_dict" in dense_state_dict:
+        dense_state_dict = dense_state_dict["state_dict"]
+    
+    # Remove "module." prefix if present (from DataParallel)
+    if any(key.startswith("module.") for key in dense_state_dict.keys()):
+        dense_state_dict = {
+            k.replace("module.", ""): v for k, v in dense_state_dict.items()
+        }
+    
+    # Create a model to get the structure
+    num_classes = 10 if dataset_name.lower() == "cifar10" else 100
+    model = get_model(model_name, num_classes=num_classes)
+    model.load_state_dict(dense_state_dict)
+    
+    # Create initial (all-ones) masks from the model structure
+    prunable_layers = get_prunable_layers(model)
+    dense_masks = create_initial_masks(prunable_layers)
+    
+    # Compute first pruning mask from trained dense weights
+    # Calculate pruning rate: sparsity^(1/num_iterations)
+    prune_rate_per_iteration = 1.0 - (target_sparsity ** (1.0 / num_iterations))
+    
+    if use_global_pruning:
+        masks_after_iter0 = prune_by_magnitude_global(
+            prune_rate_per_iteration,
+            dense_masks,
+            prunable_layers
+        )
+    else:
+        prune_percents = {k: prune_rate_per_iteration for k in dense_masks.keys()}
+        masks_after_iter0 = prune_by_percent(prune_percents, dense_masks, prunable_layers)
+    
+    # Build iteration history from dense training
+    dense_training = dense_results.get("training", {})
+    iteration_history = {
+        "train_losses": dense_training.get("train_losses", []),
+        "train_accs": dense_training.get("train_accs", []),
+        "test_losses": dense_training.get("test_losses", []),
+        "test_accs": dense_training.get("test_accs", []),
+    }
+    
+    best_test_acc = max(iteration_history["test_accs"]) if iteration_history["test_accs"] else 0.0
+    best_epoch_idx = (
+        iteration_history["test_accs"].index(best_test_acc)
+        if iteration_history["test_accs"]
+        else 0
+    )
+    
+    # Create checkpoint as if iteration 0 is complete
+    checkpoint = {
+        "model_state_dict": dense_state_dict,
+        "initial_state_dict": dense_state_dict,  # Same as model (will be reset in iter 1)
+        "optimizer_state_dict": None,
+        "scheduler_state_dict": None,
+        "iteration": 0,  # Iteration 0 complete, next will be iteration 1
+        "epoch": -1,  # Signals end of iteration
+        "current_sparsity": 0.0,  # No pruning yet
+        "masks": {k: v.astype(np.float32) for k, v in dense_masks.items()},
+        "best_test_acc": float(best_test_acc),
+        "best_epoch_idx": int(best_epoch_idx),
+        "best_model_state_dict": dense_state_dict,
+        "elapsed_training_seconds": float(
+            dense_results.get("training", {}).get("training_time_seconds", 0.0)
+        ),
+        "iteration_history": iteration_history,
+        "results": {
+            "config": {
+                "algorithm": "imp",
+                "model_name": model_name,
+                "dataset_name": dataset_name,
+                "target_sparsity": target_sparsity,
+                "num_iterations": num_iterations,
+                "use_global_pruning": use_global_pruning,
+                "seed": seed,
+            },
+            "iterations": [
+                {
+                    "iteration": 0,
+                    "sparsity": 0.0,
+                    "test_loss": iteration_history["test_losses"][-1] if iteration_history["test_losses"] else 0.0,
+                    "test_accuracy": best_test_acc,
+                    "epoch_count": len(iteration_history["test_accs"]),
+                }
+            ],
+            "final_results": {},
+        },
+    }
+    
+    print(f"✓ Created IMP checkpoint from dense baseline")
+    print(f"  Dense training accuracy: {best_test_acc:.2f}%")
+    print(f"  Will start IMP from iteration 1")
+    
+    return checkpoint
+
+
 def run_experiment(
     algorithm: str,
     model: str,
@@ -4367,6 +4527,11 @@ Examples:
   # Recompute missing canonical efficiency metrics for an existing output folder
   python -m src.experiments --algorithm recompute_metrics \\
       --result_dir ./results/imp/imp_resnet20_cifar10_s0.9_seed42/20260331_120000
+
+  # Run IMP starting from iteration 1 using a dense baseline (auto-converts dense folder)
+  python -m src.experiments --algorithm imp --model resnet20 --dataset cifar10 \\
+      --target_sparsity 0.9 --num_iterations 10 \\
+      --resume_from ./results/dense/dense_resnet20_cifar10_seed42/20260101_120000
 
   # Quick test modes
   python -m src.experiments --mode quick_imp
