@@ -3703,6 +3703,9 @@ def _create_imp_checkpoint_dict_from_dense(
         prune_percents = {k: prune_rate_per_iteration for k in dense_masks.keys()}
         masks_after_iter0 = prune_by_percent(prune_percents, dense_masks, prunable_layers)
     
+    # Sparsity after applying the first pruning step
+    first_sparsity = get_overall_sparsity(masks_after_iter0)
+    
     # Build iteration history from dense training
     dense_training = dense_results.get("training", {})
     iteration_history = {
@@ -3719,16 +3722,17 @@ def _create_imp_checkpoint_dict_from_dense(
         else 0
     )
     
-    # Create checkpoint as if iteration 0 is complete
+    # Create checkpoint as if iteration 0 is complete and IMP should start at iteration 1
+    # Use the masks computed after pruning the trained dense weights (masks_after_iter0)
     checkpoint = {
         "model_state_dict": dense_state_dict,
-        "initial_state_dict": dense_state_dict,  # Same as model (will be reset in iter 1)
+        "initial_state_dict": dense_state_dict,  # Reset point for subsequent iterations
         "optimizer_state_dict": None,
         "scheduler_state_dict": None,
-        "iteration": 0,  # Iteration 0 complete, next will be iteration 1
-        "epoch": -1,  # Signals end of iteration
-        "current_sparsity": 0.0,  # No pruning yet
-        "masks": {k: v.astype(np.float32) for k, v in dense_masks.items()},
+        "iteration": 1,  # Next iteration to run is 1 (skip dense/iteration-0 training)
+        "epoch": -1,  # Signals end of previous iteration
+        "current_sparsity": float(first_sparsity),
+        "masks": {k: v.astype(np.float32) for k, v in masks_after_iter0.items()},
         "best_test_acc": float(best_test_acc),
         "best_epoch_idx": int(best_epoch_idx),
         "best_model_state_dict": dense_state_dict,
