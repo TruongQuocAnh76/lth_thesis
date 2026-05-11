@@ -19,7 +19,7 @@
     "momentum": 0.9,
     "weight_decay": 0.0005,
     "use_global_pruning": true,
-    "seed": 42,
+    "seed": 67,
     "pruning_steps": [
       0.4357726,
       0.19999999999999998,
