@@ -73,6 +73,7 @@
 % \usepackage{amssymb} % removed due to conflict with unicode-math
 \usepackage{bm} % for bold math symbols
 \usepackage{graphicx}
+\graphicspath{{image/}}
 \usepackage{subcaption}
 \usepackage{booktabs}
 % \usepackage{mathptmx}	% same Time New Roma
@@ -99,7 +100,7 @@
 }
 
 
-\crname{Khoá luận tốt nghiệp}
+\crname{Khoá luận tốt nghiệp đại học hệ chính quy}
 \ctname{Cải Tiến Pruning Hybrid Thích Ứng Để Tìm Vé Số May Mắn Trong Mạng Nơ-ron Sâu}
 \cstuname{
 Trương Quốc Anh - 22001543 \\
@@ -152,7 +153,17 @@ và các bạn để báo cáo được hoàn thiện hơn.
 Xin chân thành cảm ơn!\end{acknowledgments}
 
 \begin{abstract}
-Nội dung chính của tiểu luận ...    
+    Giả thuyết Vé số May mắn (Lottery Ticket Hypothesis) chỉ ra rằng trong một mạng nơ-ron dày 
+    đặc tồn tại các mạng con thưa có khả năng đạt hiệu suất tương đương hoặc vượt trội so với 
+    mạng gốc. Khóa luận này thực hiện thử nghiệm và đánh giá các thuật toán 
+    tìm vé số may mắn, bao gồm IMP, Early-Bird, GraSP, SynFlow và Hybrid, trên các cấu hình 
+    ResNet-20/CIFAR-10, ResNet-20/CIFAR-100 và ResNet-50/CIFAR-10. Đồng thời, khóa luận đề xuất 
+    một biến thể cải tiến của thuật toán Hybrid với ba điểm cải thiện: (1) xác định tỉ lệ cắt 
+    tỉa one-shot động dựa trên Fisher Information Trace thay vì cố định theo kinh nghiệm, (2) sử 
+    dụng Knowledge Distillation từ mô hình gốc để hướng dẫn phục hồi biểu diễn sau bước cắt tỉa lớn, 
+    và (3) áp dụng lịch học warm-up tuyến tính tại đầu mỗi bước iterative để tránh hội tụ cục bộ. Kết 
+    quả thực nghiệm cho thấy Hybrid-Improve đạt mức sụt giảm độ chính xác thấp nhất ở các mức sparsity
+    vừa phải và có tính ổn định tốt nhất qua nhiều lần chạy ở tất cả các mức sparsity.
 \end{abstract}
  
 % Danh sách từ viết tắt
@@ -170,7 +181,6 @@ Nội dung chính của tiểu luận ...
 \input{chapters/methodology}
 \input{chapters/experimental-setup}
 \input{chapters/results&analysis}
-\input{chapters/discussion}
 \input{chapters/conclusion}
 
 %\rhead{\thepage}  % Sets the right side header to show the page number

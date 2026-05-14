@@ -1,1 +1,23 @@
 \chapter{Kết luận}
+Luận văn này đã thực hiện khảo sát và đánh giá thực nghiệm nhiều thuật toán cắt tỉa mạng nơ-ron,
+bao gồm GraSP, SynFlow, IMP, Early-Bird, Hybrid và Hybrid-Improve,
+trên các cấu hình ResNet-20/CIFAR-10, ResNet-20/CIFAR-100 và ResNet-50/CIFAR-10.
+
+Kết quả cho thấy các phương pháp hybrid đạt cân bằng tốt nhất giữa độ chính xác,
+chi phí huấn luyện và tính ổn định.
+Hybrid và Hybrid-Improve duy trì mức sụt giảm tương đối nhỏ ngay cả ở $90\%$ sparsity,
+đồng thời ổn định hơn đáng kể so với các phương pháp khác.
+Trong đó, Hybrid-Improve cho thấy độ ổn định tốt nhất giữa các lần chạy khác nhau.
+
+GraSP nổi bật ở khả năng tạo phân phối độ thưa đồng đều và ổn định giữa các tầng,
+trong khi SynFlow cho thấy độ nhạy cao với khởi tạo ngẫu nhiên.
+IMP đạt hiệu suất tương đối tốt nhưng chi phí huấn luyện rất cao,
+làm hạn chế tính thực tiễn ở quy mô lớn.
+Early-Bird là phương pháp kém ổn định nhất tại mức độ thưa cực cao,
+đặc biệt trên CIFAR-100.
+
+Nhìn chung, kết quả thực nghiệm xác nhận rằng không tồn tại một thuật toán pruning tối ưu cho mọi trường hợp.
+Hiệu quả của pruning phụ thuộc mạnh vào kiến trúc mạng, độ khó của bài toán,
+mức độ thưa mục tiêu và năng lực tính toán của phần cứng.
+Tuy nhiên, các chiến lược hybrid cho thấy tiềm năng lớn như một hướng tiếp cận cân bằng
+giữa hiệu suất và chi phí, đặc biệt trong các bài toán yêu cầu mức nén cao nhưng vẫn cần duy trì độ chính xác.

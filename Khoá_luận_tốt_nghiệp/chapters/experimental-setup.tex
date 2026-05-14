@@ -1,8 +1,8 @@
 \chapter{Thiết lập thử nghiệm}
     \section{Bộ dữ liệu}
         Các thử nghiệm được thực hiện trên hai bộ dữ liệu phân loại ảnh tiêu chuẩn.
-        Các bộ dữ liệu này được chọn vì chúng được sử dụng rộng rãi trong văn
-        献 nghiên cứu về pruning mạng nơ-ron, cho phép so sánh trực tiếp với
+        Các bộ dữ liệu này được chọn vì chúng được sử dụng rộng rãi trong các
+        nghiên cứu về pruning mạng nơ-ron, cho phép so sánh trực tiếp với
         các công trình trước đây \cite{imp, grasp, synflow, hybrid}.
          
         % \subsection{MNIST}
@@ -63,7 +63,6 @@
         \hline
         \textbf{Bộ dữ liệu} & \textbf{Lớp} & \textbf{Kích thước ảnh} & \textbf{Train} & \textbf{Test} & \textbf{Màu sắc} & \textbf{Vai trò} \\
         \hline
-        MNIST     & 10  & $28\times28$ & 60\,000 & 10\,000 & Xám & Kiểm chứng nhanh \\
         CIFAR-10  & 10  & $32\times32$ & 50\,000 & 10\,000 & RGB & Benchmark chính  \\
         CIFAR-100 & 100 & $32\times32$ & 50\,000 & 10\,000 & RGB & Đánh giá mở rộng \\
         \hline
@@ -102,11 +101,9 @@ từ mạng nhỏ gọn đến mạng sâu có dung lượng lớn.
     Mạng gồm bốn stages với lần lượt 64, 128, 256 và 512 kênh đặc trưng
     (feature channels).
      
-    ResNet-50 được sử dụng trên CIFAR-100 để đánh giá liệu các \textit{winning
+    ResNet-50 được sử dụng trên CIFAR-10 để đánh giá liệu các \textit{winning
     ticket} có tồn tại và duy trì hiệu năng cao trong mô hình có dung lượng lớn
     hay không.
-    Khối lượng tham số cao hơn cũng giúp kiểm tra khả năng mở rộng của
-    thuật toán Hybrid-Improve khi không gian tìm kiếm tăng lên.
 
     % \section{Siêu tham số}
     % \label{subsec:algo_hparams}
@@ -197,10 +194,7 @@ từ mạng nhỏ gọn đến mạng sâu có dung lượng lớn.
     % ----------------------------------------------------------
     \subsection{Chỉ số hiệu năng dự đoán}
     \label{subsec:accuracy}
-
     	\textbf{Final Test Accuracy} (Độ chính xác kiểm tra cuối cùng, \%) là độ chính xác trên tập kiểm tra ở epoch cuối cùng sau khi huấn luyện hoặc tinh chỉnh. Đây là chỉ số chính được báo cáo trong các bảng và biểu đồ tổng hợp.
-
-    	\textbf{Best Test Accuracy} (Độ chính xác kiểm tra tốt nhất, \%) là giá trị cao nhất đạt được trên tập kiểm tra trong toàn bộ quá trình huấn luyện/tinh chỉnh. Chỉ số này được trình bày để tham khảo thêm.
 
     	\textbf{Accuracy Drop} ($\Delta$Acc, \%) đo mức suy giảm độ chính xác so với mô hình gốc (dense) trên cùng kiến trúc và bộ dữ liệu:
     \begin{equation}
@@ -214,9 +208,11 @@ từ mạng nhỏ gọn đến mạng sâu có dung lượng lớn.
     \subsection{Chỉ số nén và sparsity}
     \label{subsec:compression_metrics}
 
-    	\textbf{Target Sparsity} (Sparsity mục tiêu, \%) là tỷ lệ sparsity được đặt trước cho mỗi thử nghiệm (ví dụ: 30\%, 60\%, 90\%).
+    	\textbf{Target Sparsity} (Sparsity mục tiêu) là tỷ lệ sparsity được đặt trước cho mỗi thử nghiệm (ví dụ: 30\%, 60\%, 90\%).
 
-    	\textbf{Achieved Sparsity} (Sparsity đạt được, \%) là tỷ lệ sparsity thực tế sau khi pruning, được tính theo công thức:
+    	\textbf{Achieved Sparsity} (Sparsity đạt được) là tỷ lệ sparsity thực tế sau khi pruning, được tính theo công thức:
+
+        \textbf{Sparsity Distribution} (Phân bố sparsity) là biểu đồ nhiệt thể hiện tỷ lệ phần trăm tham số khác 0 trong mỗi lớp hoặc stage của mạng sau khi pruning. Biểu đồ này giúp trực quan hóa cách sparsity được phân bổ qua các tầng của mô hình, từ đó đánh giá xem pruning có tập trung vào các lớp nào hay không.
     \begin{equation}
         s = 1 - \frac{\text{Số tham số khác 0}}{\text{Tổng số tham số}}
     \end{equation}

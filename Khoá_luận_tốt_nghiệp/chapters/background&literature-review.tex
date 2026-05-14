@@ -5,7 +5,7 @@
     \section{Phân loại thuật toán}
         Dựa trên các nghiên cứu hiện nay, các thuật toán tìm kiếm vé trúng thưởng có thể được phân nhóm dựa trên thời điểm thực hiện pruning và cơ chế xác định tầm quan trọng của các kết nối neuron.
 
-        \subsection{Nhóm cắt tỉa sau kết nối}
+        \subsection{Nhóm cắt tỉa sau huấn luyện}
             Đây là cách tiếp cận nguyên bản của LTH, yêu cầu mô hình phải trải qua quá trình huấn luyện để xác định các trọng số quan trọng.
 
             \gls{imp}: Là phương pháp nền tảng dùng để xác định các mạng con có khả năng huấn luyện độc lập. Thuật toán thực hiện chu kỳ huấn luyện - cắt tỉa - đặt lại (reset) trọng số về giá trị khởi tạo ban đầu \cite{article}. Mặc dù \gls{imp} đạt hiệu suất cao ở mức độ thưa cực đại, chi phí tính toán của nó rất lớn do phải huấn luyện lại mạng nhiều lần.
