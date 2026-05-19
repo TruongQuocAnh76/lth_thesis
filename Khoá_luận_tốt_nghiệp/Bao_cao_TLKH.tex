@@ -22,6 +22,7 @@
 \usepackage{fontspec}
 \setmainfont{Latin Modern Roman}
 \usepackage{tabularx}
+\usepackage{xspace}
 
 \usepackage{chngcntr}
 \counterwithout{figure}{chapter}
@@ -64,6 +65,52 @@
 \newacronym{grasp}{GraSP}{Gradient Signal Preservation}
 \newacronym{sf}{SynFlow}{Iterative Synaptic Flow Pruning}
 \newacronym{snip}{SNIP}{Single Shot Network Pruning}
+\newacronym{sgd}{SGD}{Stochastic Gradient Descent}
+\newacronym{bn}{BN}{Batch Normalization}
+\newacronym{flops}{FLOPs}{floating point operations}
+\newcommand{\pruning}{cắt tỉa\xspace}
+\newglossaryentry{one_shot_pruning}{name={one-shot pruning},description={cắt tỉa một bước}}
+\newglossaryentry{early_stopping}{name={early stopping},description={dừng sớm}}
+\newglossaryentry{data_agnostic}{name={data-agnostic},description={không phụ thuộc dữ liệu}}
+\newglossaryentry{layer_collapse}{name={layer-collapse},description={sụp đổ tầng}}
+\newglossaryentry{mask_distance}{name={mask distance},description={khoảng cách giữa các mặt nạ}}
+\newglossaryentry{structured_channel_pruning}{name={structured channel pruning},description={cắt tỉa kênh có cấu trúc}}
+\newglossaryentry{warm_up}{name={warm-up},description={giai đoạn khởi động}}
+\newglossaryentry{cosine_learning_rate_schedule}{name={cosine learning rate schedule},description={lịch điều chỉnh tốc độ học cosine}}
+\newglossaryentry{sparsity}{name={sparsity},description={độ thưa}}
+\newglossaryentry{dense}{name={dense},description={dày đặc}}
+\newglossaryentry{binary_mask}{name={binary mask},description={mặt nạ nhị phân}}
+\newglossaryentry{sparse_mask}{name={sparse mask},description={mặt nạ thưa}}
+\newglossaryentry{hadamard_product}{name={Hadamard product},description={phép nhân theo từng phần tử}}
+\newglossaryentry{pruning_at_initialization}{name={pruning at initialization},description={cắt tỉa tại thời điểm khởi tạo}}
+\newglossaryentry{distillation}{name={distillation},description={chưng cất tri thức}}
+\newglossaryentry{optimizer}{name={optimizer},description={thuật toán tối ưu}}
+\newglossaryentry{magnitude}{name={magnitude},description={độ lớn}}
+\newglossaryentry{resetting}{name={resetting},description={đặt lại}}
+\newglossaryentry{late_resetting}{name={late resetting},description={đặt lại muộn}}
+\newglossaryentry{sign}{name={sign},description={dấu}}
+\newglossaryentry{stability}{name={stability},description={tính ổn định}}
+\newglossaryentry{basin}{name={basin},description={lòng chảo}}
+\newglossaryentry{linear_mode_connectivity}{name={linear mode connectivity},description={kết nối tuyến tính trên không gian tham số}}
+\newglossaryentry{scaling_factor}{name={scaling factor},description={hệ số tỉ lệ}}
+\newglossaryentry{pruning_mask}{name={pruning mask},description={mặt nạ tỉa}}
+\newglossaryentry{connection_sensitivity}{name={connection sensitivity},description={độ nhạy kết nối}}
+\newglossaryentry{maximal_critical_compression}{name={Maximal Critical Compression},description={nén tới hạn cực đại}}
+\newglossaryentry{magnitude_criterion}{name={magnitude criterion},description={tiêu chí độ lớn}}
+\newglossaryentry{iterative_geometric_schedule}{name={iterative geometric schedule},description={lịch trình cắt tỉa hình học lặp lại}}
+\newglossaryentry{patience_based_fine_tuning}{name={patience-based fine-tuning},description={tinh chỉnh dựa trên patience}}
+\newglossaryentry{train_loss}{name={train loss},description={hàm mất mát huấn luyện}}
+\newglossaryentry{representation}{name={representation},description={biểu diễn}}
+\newacronym{fim}{FIM}{Fisher Information Matrix}
+\newglossaryentry{loss_landscape}{name={loss landscape},description={bề mặt mất mát}}
+\newglossaryentry{low_precision}{name={low-precision},description={độ chính xác thấp}}
+\newglossaryentry{feature_channels}{name={feature channels},description={kênh đặc trưng}}
+\newglossaryentry{target_sparsity}{name={target sparsity},description={độ thưa mục tiêu}}
+\newglossaryentry{achieved_sparsity}{name={achieved sparsity},description={độ thưa đạt được}}
+\newglossaryentry{sparsity_distribution}{name={sparsity distribution},description={phân bố độ thưa}}
+\newglossaryentry{flops_saved}{name={FLOPs Saved},description={số phép toán tiết kiệm}}
+\newglossaryentry{hybrid_pruning}{name={hybrid pruning},description={cắt tỉa lai}}
+\newglossaryentry{iterative_pruning}{name={iterative pruning},description={cắt tỉa lặp lại}}
 
 % \usepackage[utf8]{inputenc}
 % \usepackage[T5]{fontenc}
@@ -88,7 +135,8 @@
 \newcolumntype{P}[1]{>{\centering\arraybackslash}p{#1}}
 \newcolumntype{M}[1]{>{\centering\arraybackslash}m{#1}}
 \usepackage{multirow}
-\usepackage{algorithm2e}
+\usepackage{scrhack}
+\usepackage[ruled,vlined]{algorithm2e}
 \usepackage{float}
 \usepackage{listings}
 \usepackage{hyperref}
@@ -101,7 +149,7 @@
 
 
 \crname{Khoá luận tốt nghiệp đại học hệ chính quy}
-\ctname{Cải Tiến Pruning Hybrid Thích Ứng Để Tìm Vé Số May Mắn Trong Mạng Nơ-ron Sâu}
+\ctname{Cải Tiến Thuật Toán Pruning Hybrid Để Tìm Vé Số May Mắn Trong Mạng Neuron Sâu}
 \cstuname{
 Trương Quốc Anh - 22001543 \\
 }
@@ -159,28 +207,27 @@ Xin chân thành cảm ơn!\end{acknowledgments}
     tìm vé số may mắn, bao gồm IMP, Early-Bird, GraSP, SynFlow và Hybrid, trên các cấu hình 
     ResNet-20/CIFAR-10, ResNet-20/CIFAR-100 và ResNet-50/CIFAR-10. Đồng thời, khóa luận đề xuất 
     một biến thể cải tiến của thuật toán Hybrid với ba điểm cải thiện: (1) xác định tỉ lệ cắt 
-    tỉa one-shot động dựa trên Fisher Information Trace thay vì cố định theo kinh nghiệm, (2) sử 
+    tỉa một lần động dựa trên Fisher Information Trace thay vì cố định theo kinh nghiệm, (2) sử 
     dụng Knowledge Distillation từ mô hình gốc để hướng dẫn phục hồi biểu diễn sau bước cắt tỉa lớn, 
-    và (3) áp dụng lịch học warm-up tuyến tính tại đầu mỗi bước iterative để tránh hội tụ cục bộ. Kết 
+    và (3) áp dụng lịch học khởi động (warm-up) tuyến tính tại đầu mỗi bước iterative để tránh hội tụ cục bộ. Kết 
     quả thực nghiệm cho thấy Hybrid-Improve đạt mức sụt giảm độ chính xác thấp nhất ở các mức sparsity
     vừa phải và có tính ổn định tốt nhất qua nhiều lần chạy ở tất cả các mức sparsity.
 \end{abstract}
  
 % Danh sách từ viết tắt
-\nomenclature{CIS}{Computer and Information Science}
-\printnomenclature
 
 \tableofcontents
 % \listoftables
 \listoffigures
-%\listofalgorithms
+\listofalgorithms
+\printglossary[title=Danh sách thuật ngữ]
 
 \mainmatter
 \input{chapters/introduction}
-\input{chapters/background&literature-review}
+% \input{chapters/background&literature-review}
 \input{chapters/methodology}
-\input{chapters/experimental-setup}
-\input{chapters/results&analysis}
+\input{chapters/contribution}
+% \input{chapters/results&analysis}
 \input{chapters/conclusion}
 
 %\rhead{\thepage}  % Sets the right side header to show the page number

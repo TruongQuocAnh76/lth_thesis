@@ -2,36 +2,36 @@
 \section{Động lực}
 Trong những năm gần đây, các mô hình mạng nơ-ron sâu đã đạt được những tiến bộ vượt bậc trong nhiều lĩnh vực như thị giác máy tính, xử lý ngôn ngữ tự nhiên và nhận diện giọng nói. Sự gia tăng quy mô mô hình đã mang lại những cải thiện đáng kể về độ chính xác trên nhiều tác vụ. Tuy nhiên, những cải thiện này đi kèm với chi phí tính toán và năng lượng ngày càng lớn.
 
-Theo \cite{strubell2019energy}, việc huấn luyện một mô hình Transformer lớn (213 triệu tham số) trên 8 GPU P100 trong 84 giờ đã tiêu tốn khoảng 192 pounds CO₂e, tương đương với một chuyến bay một chiều xuyên Mỹ của một hành khách. Khi tính thêm chi phí tinh chỉnh siêu tham số và phát triển mô hình, lượng phát thải carbon có thể tăng lên hàng trăm nghìn pounds. Một nghiên cứu gần đây hơn \cite{anonymous2026hugging} cho thấy tổng lượng phát thải carbon từ việc huấn luyện hàng nghìn mô hình trên Hugging Face đã đạt mức hàng chục nghìn tấn CO₂e, tương đương với phát thải của hàng chục nghìn chiếc xe hơi chạy trong một năm.
+Theo \cite{strubell2019energy}, việc huấn luyện một mô hình Transformer lớn (213 triệu tham số) trên 8 GPU P100 trong 84 giờ đã tiêu tốn khoảng 192 pounds $CO_2$, tương đương với một chuyến bay một chiều xuyên Mỹ của một hành khách. Khi tính thêm chi phí tinh chỉnh siêu tham số và phát triển mô hình, lượng phát thải carbon có thể tăng lên hàng trăm nghìn pounds. Một nghiên cứu gần đây hơn \cite{anonymous2026hugging} cho thấy tổng lượng phát thải carbon từ việc huấn luyện hàng nghìn mô hình trên Hugging Face đã đạt mức hàng chục nghìn tấn $CO_2$, tương đương với phát thải của hàng chục nghìn chiếc xe hơi chạy trong một năm.
 
-Đồng thời, nhu cầu triển khai trí tuệ nhân tạo trên các thiết bị biên như điện thoại thông minh, camera giám sát và hệ thống IoT ngày càng cao. Những thiết bị này có tài nguyên tính toán và pin hạn chế, đòi hỏi các mô hình phải nhỏ gọn, tiết kiệm năng lượng nhưng vẫn duy trì hiệu suất cao. Việc tiếp tục mở rộng quy mô mô hình không chỉ gây áp lực lớn lên môi trường mà còn làm gia tăng khoảng cách giữa các tổ chức có nguồn lực mạnh (công ty công nghệ lớn) và các nhóm nghiên cứu học thuật hoặc các quốc gia đang phát triển.
+Đồng thời, nhu cầu triển khai trí tuệ nhân tạo trên các thiết bị biên như điện thoại thông minh, camera giám sát và hệ thống IoT ngày càng cao. Những thiết bị này có tài nguyên tính toán và pin hạn chế, đòi hỏi các mô hình phải nhỏ gọn, tiết kiệm năng lượng nhưng vẫn duy trì hiệu suất cao. Việc tiếp tục mở rộng quy mô mô hình không chỉ gây áp lực lớn lên môi trường mà còn làm gia tăng khoảng cách giữa các tổ chức có nguồn lực mạnh (như các công ty công nghệ lớn) và các nhóm nghiên cứu học thuật hoặc các quốc gia đang phát triển.
 
-Giả thuyết Vé số May mắn được Frankle và Carbin (2019) đề xuất đã mở ra một hướng tiếp cận đầy tiềm năng: trong một mạng nơ-ron dày đặc được khởi tạo ngẫu nhiên tồn tại những mạng con thưa có thể đạt hiệu suất tương đương hoặc tốt hơn mạng gốc khi được huấn luyện độc lập. Những “tờ vé số may mắn” này giúp giảm đáng kể chi phí tính toán, bộ nhớ và năng lượng tiêu thụ mà không làm mất đi hiệu suất mô hình, góp phần hướng tới sự phát triển bền vững của trí tuệ nhân tạo.
+Giả thuyết Vé số May mắn \gls{lth} được Frankle và Carbin (2019) đề xuất đã mở ra một hướng tiếp cận đầy tiềm năng: trong một mạng nơ-ron dày đặc được khởi tạo ngẫu nhiên tồn tại những mạng con thưa có thể đạt hiệu suất tương đương hoặc tốt hơn mạng gốc khi được huấn luyện độc lập. Những “tờ vé số may mắn” này giúp giảm đáng kể chi phí tính toán, bộ nhớ và năng lượng tiêu thụ mà không làm mất đi hiệu suất mô hình, góp phần hướng tới sự phát triển bền vững của trí tuệ nhân tạo.
 
 Vì vậy, việc nghiên cứu và cải tiến các thuật toán tìm vé số may mắn không chỉ có ý nghĩa khoa học mà còn mang tính cấp thiết về mặt kinh tế và môi trường.
 
 \section{Vấn đề nghiên cứu}
 Mặc dù LTH đã được chứng minh trên nhiều công trình nghiên cứu, việc tìm kiếm vé số may mắn vẫn tồn tại nhiều thách thức:
 \begin{itemize}
-    \item Các phương pháp truyền thống như Iterative Magnitude Pruning (IMP) cho kết quả tốt nhưng chi phí tính toán rất cao.
-    \item Các phương pháp cắt tỉa một lần (one-shot) như SNIP, GraSP, SynFlow nhanh hơn nhưng thường kém ổn định ở độ thưa cao hoặc trên tập dữ liệu phức tạp.
-    \item Các phương pháp lai (hybrid) gần đây cho thấy tiềm năng kết hợp ưu điểm của cả hai hướng, tuy nhiên vẫn thiếu cơ chế thích ứng động về tỷ lệ cắt tỉa giữa giai đoạn one-shot và iterative.
+    \item Các phương pháp truyền thống như \gls{imp} cho kết quả tốt nhưng chi phí tính toán rất cao.
+    \item Các phương pháp cắt tỉa một lần \gls{one_shot_pruning} như SNIP, GraSP, SynFlow nhanh hơn nhưng thường kém ổn định ở độ thưa cao hoặc trên tập dữ liệu phức tạp.
+    \item Các phương pháp cắt tỉa lai \gls{hybrid_pruning} gần đây cho thấy tiềm năng kết hợp ưu điểm của cả hai hướng, tuy nhiên vẫn thiếu cơ chế thích ứng động về tỷ lệ cắt tỉa giữa giai đoạn cắt tỉa một lần và \gls{iterative_pruning}.
 \end{itemize}
 
-Do đó, đề tài tập trung vào việc so sánh thực nghiệm toàn diện các thuật toán tìm vé số may mắn và cải tiến phương pháp Hybrid theo hướng thích ứng để nâng cao hiệu quả và khả năng tổng quát hóa.
+Do đó, đề tài tập trung vào việc so sánh thực nghiệm các thuật toán tìm vé số may mắn và cải tiến phương pháp cắt tỉa lai theo hướng thích ứng để nâng cao hiệu quả và khả năng tổng quát hóa.
 
 \section{Mục tiêu nghiên cứu}
-Mục tiêu chính của đề tài là xây dựng và đánh giá các phương pháp tìm vé số may mắn trong mạng nơ-ron sâu, tập trung vào việc cải tiến phương pháp cắt tỉa lai (hybrid pruning) nhằm cân bằng giữa độ chính xác, độ thưa và chi phí tính toán.
+Mục tiêu chính của đề tài là xây dựng và đánh giá các phương pháp tìm vé số may mắn trong mạng nơ-ron sâu, tập trung vào việc cải tiến phương pháp cắt tỉa lai nhằm cân bằng giữa độ chính xác, độ thưa và chi phí tính toán.
 
 \section{Đóng góp}
 Khóa luận có những đóng góp sau:
 
 \begin{enumerate}
-    \item Đề xuất biến thể cải tiến của thuật toán hybrid với cơ chế chuyển giai đoạn thích ứng, giúp cải thiện chất lượng vé số may mắn so với các phương pháp cơ sở và giảm chi phí tính toán.
+    \item Đề xuất biến thể cải tiến của thuật toán cắt tỉa lai với cơ chế chuyển giai đoạn thích ứng, giúp cải thiện chất lượng vé số may mắn so với các phương pháp cơ sở và giảm chi phí tính toán.
     \item Thực hiện và phân tích chi tiết trên nhiều mô hình và tập dữ liệu, bao gồm:
     \begin{itemize}
-        \item So sánh độ chính xác theo mức sparsity.
-        \item Phân tích phân bố độ thưa theo từng layer.
+        \item So sánh độ chính xác theo mức độ thưa \gls{sparsity}.
+        \item Phân tích phân bố độ thưa theo từng tầng.
         \item Đánh giá khả năng suy luận của các mô hình thưa với mỗi thuật toán cắt tỉa.
     \end{itemize}
 \end{enumerate}

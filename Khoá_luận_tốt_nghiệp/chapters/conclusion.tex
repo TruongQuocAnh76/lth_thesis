@@ -1,23 +1,22 @@
-\chapter{Kết luận}
-Luận văn này đã thực hiện khảo sát và đánh giá thực nghiệm nhiều thuật toán cắt tỉa mạng nơ-ron,
-bao gồm GraSP, SynFlow, IMP, Early-Bird, Hybrid và Hybrid-Improve,
-trên các cấu hình ResNet-20/CIFAR-10, ResNet-20/CIFAR-100 và ResNet-50/CIFAR-10.
+\chapter*{Kết luận}
+Khóa luận đã thục hiện 2 đóng góp chính: 
+(i) đề xuất biến thể Hybrid-Improved với cơ chế thích ứng động, và 
+(ii) thực hiện phân tích thực nghiệm trên 2 mô hình ResNet20, ResNet50 và 2 bộ dữ liệu CIFAR-10 và CIFAR-100.
 
-Kết quả cho thấy các phương pháp hybrid đạt cân bằng tốt nhất giữa độ chính xác,
-chi phí huấn luyện và tính ổn định.
-Hybrid và Hybrid-Improve duy trì mức sụt giảm tương đối nhỏ ngay cả ở $90\%$ sparsity,
-đồng thời ổn định hơn đáng kể so với các phương pháp khác.
-Trong đó, Hybrid-Improve cho thấy độ ổn định tốt nhất giữa các lần chạy khác nhau.
+Ba cải tiến chính được đề xuất — (1) xác định tỷ lệ cắt tỉa $r_k$ động dựa trên Fisher Information Trace, 
+(2) áp dụng Knowledge Distillation từ mô hình gốc sau bước cắt tỉa lớn, và 
+(3) sử dụng lịch warm-up tuyến tính ở đầu mỗi vòng lặp iterative
 
-GraSP nổi bật ở khả năng tạo phân phối độ thưa đồng đều và ổn định giữa các tầng,
-trong khi SynFlow cho thấy độ nhạy cao với khởi tạo ngẫu nhiên.
-IMP đạt hiệu suất tương đối tốt nhưng chi phí huấn luyện rất cao,
-làm hạn chế tính thực tiễn ở quy mô lớn.
-Early-Bird là phương pháp kém ổn định nhất tại mức độ thưa cực cao,
-đặc biệt trên CIFAR-100.
+Về kết quả thực nghiệm, các phương pháp hybrid — đặc biệt là Hybrid-Improve — 
+cho thấy hiệu suất dẫn đầu trong các mức độ thưa trung bình, 
+trên cả ba cấu hình ResNet-20/CIFAR-10, ResNet-20/CIFAR-100 và ResNet-50/CIFAR-10. 
 
-Nhìn chung, kết quả thực nghiệm xác nhận rằng không tồn tại một thuật toán pruning tối ưu cho mọi trường hợp.
-Hiệu quả của pruning phụ thuộc mạnh vào kiến trúc mạng, độ khó của bài toán,
-mức độ thưa mục tiêu và năng lực tính toán của phần cứng.
-Tuy nhiên, các chiến lược hybrid cho thấy tiềm năng lớn như một hướng tiếp cận cân bằng
-giữa hiệu suất và chi phí, đặc biệt trong các bài toán yêu cầu mức nén cao nhưng vẫn cần duy trì độ chính xác.
+Quan trọng hơn, Hybrid-Improve thể hiện độ ổn định vượt trội qua nhiều lần chạy ở tất cả các mức độ thưa, 
+một cải thiện rõ rệt so với phiên bản Hybrid gốc, vốn có độ lệch lớn hơn đáng kể, đặc biệt ở mức độ thưa cao.
+
+Tuy nhiên, kết quả cũng cho thấy không tồn tại một thuật toán tối ưu cho mọi điều kiện. 
+Trên ResNet-50, khoảng cách hiệu năng giữa GraSP và các biến thể hybrid thu hẹp đáng kể, 
+trong khi chi phí huấn luyện vẫn chênh lệch lớn, khiến GraSP trở thành lựa chọn cạnh tranh hơn trong các kiến trúc sâu.
+
+Cuối cùng, Early-Bird cho thấy sự sụp đổ hiệu năng ở mức sparsity cao, đặc biệt rõ rệt trên CIFAR-100. 
+Tuy nhiên với mức độ thưa thấp hơn, Early-Bird vẫn có thể là một lựa chọn hợp lý nhờ chi phí tính toán thấp, mặc dù độ ổn định kém hơn so với các phương pháp khác.

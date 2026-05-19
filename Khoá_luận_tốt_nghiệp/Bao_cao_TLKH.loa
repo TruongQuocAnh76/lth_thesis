@@ -1,0 +1,14 @@
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {algocf}{\numberline {1}{\ignorespaces Iterative Magnitude Pruning (IMP)}}{6}{algocf.1}%
+\contentsline {algocf}{\numberline {2}{\ignorespaces Tìm kiếm Early-Bird Ticket (EB Search)}}{8}{algocf.2}%
+\contentsline {algocf}{\numberline {3}{\ignorespaces Tính tích Hessian--gradient ($\mathbf {Hg}$)}}{11}{algocf.3}%
+\contentsline {algocf}{\numberline {4}{\ignorespaces Bảo toàn tín hiệu gradient (GraSP)}}{12}{algocf.4}%
+\contentsline {algocf}{\numberline {5}{\ignorespaces Iterative Synaptic Flow Pruning -- SynFlow}}{15}{algocf.5}%
+\contentsline {algocf}{\numberline {6}{\ignorespaces Cắt tỉa lai --- Vòng lặp chính (1/3)}}{18}{algocf.6}%
+\contentsline {algocf}{\numberline {6}{\ignorespaces Cắt tỉa lai --- Hàm \textsc {CắtTỉaTheoĐộLớn} (2/3)}}{18}{algocf.6}%
+\contentsline {algocf}{\numberline {6}{\ignorespaces Cắt tỉa lai --- Hàm \textsc {TinhChỉnh} với dừng sớm (3/3)}}{19}{algocf.6}%
+\addvspace {10\p@ }
+\contentsline {algocf}{\numberline {7}{\ignorespaces Hybrid Pruning Cải tiến -- Giai đoạn 1: Huấn luyện ban đầu}}{23}{algocf.7}%
+\contentsline {algocf}{\numberline {8}{\ignorespaces Hybrid Pruning Cải tiến -- Giai đoạn 2: Xây dựng lịch trình tỉa}}{23}{algocf.8}%
+\contentsline {algocf}{\numberline {9}{\ignorespaces Hybrid Pruning Cải tiến -- Giai đoạn 3: Tỉa và tinh chỉnh}}{24}{algocf.9}%
