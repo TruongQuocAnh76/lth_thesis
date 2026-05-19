@@ -93,7 +93,7 @@ def _infer_num_classes(dataset_name: str) -> int:
     dataset_key = dataset_name.lower()
     if dataset_key == "moons":
         return 2
-    if dataset_key in ["cifar10", "mnist"]:
+    if dataset_key in ["cifar10", "mnist", "fashion_mnist"]:
         return 10
     return 100
 
@@ -854,7 +854,7 @@ def run_imp_experiment(
     Returns:
         Experiment results dictionary
     """
-    num_classes = 10 if dataset_name == "cifar10" else 100
+    num_classes = _infer_num_classes(dataset_name)
     
     experiment = IMPExperiment(
         model_name=model_name,
@@ -1533,7 +1533,7 @@ def run_earlybird_experiment(
     Returns:
         Experiment results dictionary
     """
-    num_classes = 10 if dataset_name == "cifar10" else 100
+    num_classes = _infer_num_classes(dataset_name)
     
     experiment = EarlyBirdExperiment(
         model_name=model_name,
@@ -3382,7 +3382,7 @@ def _resolve_num_classes(
         return int(config_num_classes)
 
     dataset_key = dataset_name.lower()
-    if dataset_key in {"cifar10", "mnist"}:
+    if dataset_key in {"cifar10", "mnist", "fashion_mnist"}:
         return 10
     if dataset_key in {"cifar100"}:
         return 100
@@ -3555,7 +3555,7 @@ def _save_multiphase_summary_csv(path: Path, phases: List[Tuple[str, Dict[str, A
 
     with open(path, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['phase', 'epoch', 'train_loss', 'train_acc', 'test_loss', 'test_acc'])
+        writer.writerow(['phase', 'epoch', 'train_loss', 'train_acc', 'test_loss', 'test_acc', 'lr'])
 
         for phase_name, history in phases:
             if not isinstance(history, dict):
@@ -3565,12 +3565,14 @@ def _save_multiphase_summary_csv(path: Path, phases: List[Tuple[str, Dict[str, A
             train_accs = history.get('train_accs', history.get('train_acc', []))
             test_losses = history.get('test_losses', history.get('test_loss', []))
             test_accs = history.get('test_accs', history.get('test_acc', []))
+            lrs = history.get('lr_history', history.get('lrs', history.get('lr', [])))
 
             max_epochs = max(
                 len(train_losses),
                 len(train_accs),
                 len(test_losses),
                 len(test_accs),
+                len(lrs),
             )
 
             for epoch_idx in range(max_epochs):
@@ -3581,6 +3583,7 @@ def _save_multiphase_summary_csv(path: Path, phases: List[Tuple[str, Dict[str, A
                     f"{train_accs[epoch_idx]:.2f}" if epoch_idx < len(train_accs) else '',
                     f"{test_losses[epoch_idx]:.4f}" if epoch_idx < len(test_losses) else '',
                     f"{test_accs[epoch_idx]:.2f}" if epoch_idx < len(test_accs) else '',
+                    f"{lrs[epoch_idx]:.8f}" if epoch_idx < len(lrs) else '',
                 ])
 
 
@@ -4560,7 +4563,7 @@ Examples:
     parser.add_argument("--model", type=str, default="resnet20",
                        help="Model architecture (resnet20, vgg16, etc.)")
     parser.add_argument("--dataset", type=str, default="cifar10",
-                       help="Dataset name (cifar10, cifar100, mnist)")
+                       help="Dataset name (cifar10, cifar100, mnist, fashion_mnist)")
     parser.add_argument("--seed", type=int, default=42,
                        help="Random seed for reproducibility")
     parser.add_argument("--device", type=str, default="cuda",

@@ -6,7 +6,7 @@
         \subsection{Nhóm cắt tỉa sau huấn luyện}
             Đây là cách tiếp cận nguyên bản của LTH, yêu cầu mô hình phải trải qua quá trình huấn luyện để xác định các trọng số quan trọng.
 
-            \gls{imp}: Là phương pháp nền tảng dùng để xác định các mạng con có khả năng huấn luyện độc lập. Thuật toán thực hiện chu kỳ huấn luyện - cắt tỉa - đặt lại (reset) trọng số về giá trị khởi tạo ban đầu \cite{article}. Mặc dù \gls{imp} đạt hiệu suất cao ở mức độ thưa cực đại, chi phí tính toán của nó rất lớn do phải huấn luyện lại mạng nhiều lần.
+            \gls{imp}: Là phương pháp nền tảng dùng để xác định các mạng con có khả năng huấn luyện độc lập. Thuật toán thực hiện chu kỳ huấn luyện - cắt tỉa - đặt lại (reset) trọng số về giá trị khởi tạo ban đầu \cite{imp}. Mặc dù \gls{imp} đạt hiệu suất cao ở mức độ thưa cực đại, chi phí tính toán của nó rất lớn do phải huấn luyện lại mạng nhiều lần.
 
         \subsection{Nhóm cắt tỉa giai đoạn sớm}
             Nhóm này tìm cách khắc phục nhược điểm về chi phí của IMP bằng cách xác định cấu trúc mạng con ngay khi quá trình huấn luyện bắt đầu.
@@ -21,7 +21,7 @@
             \end{itemize}
 
         \subsection{Nhóm cắt tỉa hỗn hợp}
-            Hybrid Pruning: Một phương pháp cắt tỉa mới trong đó phần lớn các trọng số không quan trọng (khoảng 60-80\%) được loại bỏ trong một bước duy nhất \gls{one_shot_pruning}, sau đó thực hiện một giai đoạn tinh chỉnh dài hơn. Tiếp theo, các chu kỳ cắt tỉa lặp lại theo cấp số nhân (geometric-like) được áp dụng cho các trọng số còn lại để đạt được độ thưa mục tiêu với độ chính xác tối ưu \cite{hybrid}.
+            \gls{hybrid_pruning}: Một phương pháp cắt tỉa mới trong đó phần lớn các trọng số không quan trọng (khoảng 60-80\%) được loại bỏ trong \gls{one_shot_pruning}, sau đó thực hiện một giai đoạn tinh chỉnh dài hơn. Tiếp theo, các chu kỳ cắt tỉa lặp lại theo cấp số nhân (geometric-like) được áp dụng cho các trọng số còn lại để đạt được độ thưa mục tiêu với độ chính xác tối ưu \cite{hybrid}.
 
 
 \begin{table}[h]
@@ -34,15 +34,15 @@
 \hline
 \textbf{Thuật toán} & \textbf{Thời điểm cắt tỉa} & \textbf{Cơ chế xác định tầm quan trọng} & \textbf{Đặc điểm chính} \\ \hline
 
-IMP & Sau huấn luyện & Độ lớn trọng số (Magnitude) & Tiêu chuẩn vàng, chi phí cao \\ \hline
+\gls{imp} & Sau huấn luyện & \gls{magnitude} & Tiêu chuẩn vàng, chi phí cao \\ \hline
 
-Early-Bird & Giai đoạn sớm & Hệ số tỷ lệ BN (BN Scaling) & Tiết kiệm 5.8x -- 10.7x năng lượng \cite{earlybird} \\ \hline
+\gls{eb} & Giai đoạn sớm & Hệ số tỷ lệ \gls{bn} (BN Scaling) & Tiết kiệm 5.8x -- 10.7x năng lượng \cite{earlybird} \\ \hline
 
-GraSP & Tại khởi tạo & Tín hiệu Gradient (Hessian-gradient) & Bảo toàn dòng chảy gradient \\ \hline
+\gls{grasp} & Tại khởi tạo & Tín hiệu Gradient (Hessian-gradient) & Bảo toàn dòng chảy gradient \\ \hline
 
-SynFlow & Tại khởi tạo & Dòng chảy neuron (Synaptic Flow) & Không cần dữ liệu, tránh sụp đổ lớp \\ \hline
+\gls{sf} & Tại khởi tạo & Dòng chảy neuron (Synaptic Flow) & Không cần dữ liệu, tránh sụp đổ lớp \\ \hline
 
-Hybrid & Hỗn hợp & Độ lớn lặp lại kết hợp tinh chỉnh & Kết hợp ưu điểm One-shot và Iterative pruning \\ \hline
+\gls{hybrid_pruning} & Hỗn hợp & Độ lớn lặp lại kết hợp tinh chỉnh & Kết hợp ưu điểm \gls{one_shot_pruning} và \gls{iterative_pruning} \\ \hline
 \end{tabularx}
 \caption{So sánh các thuật toán cắt tỉa mạng nơ-ron}
 \end{table}

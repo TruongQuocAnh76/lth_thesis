@@ -19,8 +19,8 @@ MaskApplier = Callable[[nn.Module, MaskDict], None]
 def infer_input_shape(dataset_name: str) -> tuple[int, int, int]:
     """Infer a single-sample input shape for the configured dataset."""
     dataset = dataset_name.lower()
-    if dataset == "mnist":
-        return (1, 28, 28)
+    if dataset in {"mnist", "fashion_mnist"}:
+        return (3, 32, 32)
     return (3, 32, 32)
 
 

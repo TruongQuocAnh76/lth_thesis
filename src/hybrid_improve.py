@@ -496,6 +496,7 @@ def _finetune(
         "train_accs": [],
         "test_losses": [],
         "test_accs": [],
+        "lrs": [],
     }
     best_test_acc = (
         stopper_state["best"]
@@ -543,11 +544,13 @@ def _finetune(
 
     pbar = tqdm(range(start_epoch, max_epochs), desc=desc, disable=not verbose)
     for epoch in pbar:
+        current_lr = float(optimizer.param_groups[0]["lr"])
         # ---- LR warmup: linearly ramp from lr/10 → lr over warmup epochs ----
         if lr_warmup_epochs > 0 and epoch < lr_warmup_epochs:
             warmup_scale = (epoch + 1) / lr_warmup_epochs
             for pg in optimizer.param_groups:
                 pg["lr"] = lr * warmup_scale
+            current_lr = float(optimizer.param_groups[0]["lr"])
 
         if _use_graphs and _graph is not None:
             # CUDA-Graph replay path: copy data into static buffers, replay,
@@ -589,6 +592,7 @@ def _finetune(
         history["train_accs"].append(train_acc)
         history["test_losses"].append(test_loss)
         history["test_accs"].append(test_acc)
+        history["lrs"].append(current_lr)
 
         if test_acc > best_test_acc:
             best_test_acc = test_acc
@@ -1513,6 +1517,16 @@ def hybrid_pruning(
             "scheduler_type": ft_scheduler_type,
             "best_test_acc": ft_history["best_test_acc"],
             "final_test_acc": phase_test_acc,
+            "lr_history": ft_history.get("lrs", []),
+            "initial_lr_effective": (
+                ft_history["lrs"][0] if ft_history.get("lrs") else None
+            ),
+            "final_lr_effective": (
+                ft_history["lrs"][-1] if ft_history.get("lrs") else None
+            ),
+            "min_lr_effective": (
+                min(ft_history["lrs"]) if ft_history.get("lrs") else None
+            ),
             "train_losses": ft_history["train_losses"],
             "train_accs": ft_history["train_accs"],
             "test_losses": ft_history["test_losses"],
@@ -1579,6 +1593,16 @@ def hybrid_pruning(
         ),
         "best_phase_test_accuracy": best_phase_acc,
         "initial_test_accuracy": init_test_acc,
+        "oneshot_final_lr_effective": (
+            results["phases"][0].get("final_lr_effective")
+            if results["phases"]
+            else None
+        ),
+        "oneshot_min_lr_effective": (
+            results["phases"][0].get("min_lr_effective")
+            if results["phases"]
+            else None
+        ),
         "total_time_seconds": total_time,
         "training_computational_cost_seconds": total_time,
         "stopped_early": stopped_early,
@@ -1630,7 +1654,7 @@ def hybrid_pruning(
         """Save epoch-by-epoch metrics in the canonical summary format."""
         with open(path, 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['phase', 'epoch', 'train_loss', 'train_acc', 'test_loss', 'test_acc'])
+            writer.writerow(['phase', 'epoch', 'train_loss', 'train_acc', 'test_loss', 'test_acc', 'lr'])
 
             phase_items = []
             if 'initial_training' in results_dict:
@@ -1645,11 +1669,13 @@ def hybrid_pruning(
                 train_accs = phase.get('train_accs', [])
                 test_losses = phase.get('test_losses', [])
                 test_accs = phase.get('test_accs', [])
+                lrs = phase.get('lr_history', phase.get('lrs', []))
                 max_epochs = max(
                     len(train_losses),
                     len(train_accs),
                     len(test_losses),
                     len(test_accs),
+                    len(lrs),
                 )
                 for epoch_idx in range(max_epochs):
                     writer.writerow([
@@ -1659,6 +1685,7 @@ def hybrid_pruning(
                         f"{train_accs[epoch_idx]:.2f}" if epoch_idx < len(train_accs) else '',
                         f"{test_losses[epoch_idx]:.4f}" if epoch_idx < len(test_losses) else '',
                         f"{test_accs[epoch_idx]:.2f}" if epoch_idx < len(test_accs) else '',
+                        f"{lrs[epoch_idx]:.8f}" if epoch_idx < len(lrs) else '',
                     ])
 
     # Construct the save directory

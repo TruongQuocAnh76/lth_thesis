@@ -10,10 +10,10 @@ import os
 
 def get_dataset(dataset_name, train=True, download=True, data_dir='./data'):
     """
-    Get dataset (CIFAR-10, CIFAR-100, or MNIST).
+    Get dataset (CIFAR-10, CIFAR-100, MNIST, or Fashion-MNIST).
 
     Args:
-        dataset_name (str): 'cifar10', 'cifar100', or 'mnist'
+        dataset_name (str): 'cifar10', 'cifar100', 'mnist', or 'fashion_mnist'
         train (bool): If True, return training set; else test set
         download (bool): Whether to download the dataset
         data_dir (str): Directory to store the dataset
@@ -52,15 +52,36 @@ def get_dataset(dataset_name, train=True, download=True, data_dir='./data'):
         ])
     elif dataset == 'mnist':
         dataset_class = torchvision.datasets.MNIST
-        mean = (0.1307,)
-        std = (0.3081,)
-        # For MNIST, keep augmentation minimal (random crop for train)
+        mean = (0.1307, 0.1307, 0.1307)
+        std = (0.3081, 0.3081, 0.3081)
+        # Match the repo's CIFAR-style 3x32x32 model inputs.
         train_transform = transforms.Compose([
             transforms.RandomCrop(28, padding=4),
+            transforms.Resize((32, 32)),
+            transforms.Grayscale(num_output_channels=3),
             transforms.ToTensor(),
             transforms.Normalize(mean, std),
         ])
         test_transform = transforms.Compose([
+            transforms.Resize((32, 32)),
+            transforms.Grayscale(num_output_channels=3),
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ])
+    elif dataset == 'fashion_mnist':
+        dataset_class = torchvision.datasets.FashionMNIST
+        mean = (0.2860, 0.2860, 0.2860)
+        std = (0.3530, 0.3530, 0.3530)
+        train_transform = transforms.Compose([
+            transforms.RandomCrop(28, padding=4),
+            transforms.Resize((32, 32)),
+            transforms.Grayscale(num_output_channels=3),
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ])
+        test_transform = transforms.Compose([
+            transforms.Resize((32, 32)),
+            transforms.Grayscale(num_output_channels=3),
             transforms.ToTensor(),
             transforms.Normalize(mean, std),
         ])
@@ -92,10 +113,10 @@ def get_dataloaders(
     persistent_workers: bool = False,
 ):
     """
-    Get train, validation, and test data loaders for CIFAR-10, CIFAR-100, or MNIST datasets.
+    Get train, validation, and test data loaders for CIFAR-10, CIFAR-100, MNIST, or Fashion-MNIST datasets.
 
     Args:
-        dataset_name (str): 'cifar10', 'cifar100', or 'mnist'
+        dataset_name (str): 'cifar10', 'cifar100', 'mnist', or 'fashion_mnist'
         batch_size (int): Batch size for loaders
         num_workers (int): Number of workers for data loading
         val_split (float): Fraction of training data to use for validation

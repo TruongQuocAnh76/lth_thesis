@@ -320,12 +320,14 @@ def _finetune(
         "train_accs": [],
         "test_losses": [],
         "test_accs": [],
+        "lrs": [],
     }
     best_test_acc = 0.0
     best_state = None
 
     pbar = tqdm(range(max_epochs), desc=desc, disable=not verbose)
     for epoch in pbar:
+        current_lr = float(optimizer.param_groups[0]["lr"])
         train_loss, train_acc = train_epoch(
             model, train_loader, criterion, optimizer, device,
             masks=masks, apply_mask_fn=apply_mask_fn,
@@ -340,6 +342,7 @@ def _finetune(
         history["train_accs"].append(train_acc)
         history["test_losses"].append(test_loss)
         history["test_accs"].append(test_acc)
+        history["lrs"].append(current_lr)
 
         if test_acc > best_test_acc:
             best_test_acc = test_acc
@@ -893,6 +896,16 @@ def hybrid_pruning(
                 if ft_history.get("test_accs")
                 else ft_history["best_test_acc"]
             ),
+            "lr_history": ft_history.get("lrs", []),
+            "initial_lr_effective": (
+                ft_history["lrs"][0] if ft_history.get("lrs") else None
+            ),
+            "final_lr_effective": (
+                ft_history["lrs"][-1] if ft_history.get("lrs") else None
+            ),
+            "min_lr_effective": (
+                min(ft_history["lrs"]) if ft_history.get("lrs") else None
+            ),
             "train_losses": ft_history["train_losses"],
             "train_accs": ft_history["train_accs"],
             "test_losses": ft_history["test_losses"],
@@ -959,6 +972,16 @@ def hybrid_pruning(
         ),
         "best_phase_test_accuracy": best_phase_acc,
         "initial_test_accuracy": init_test_acc,
+        "oneshot_final_lr_effective": (
+            results["phases"][0].get("final_lr_effective")
+            if results["phases"]
+            else None
+        ),
+        "oneshot_min_lr_effective": (
+            results["phases"][0].get("min_lr_effective")
+            if results["phases"]
+            else None
+        ),
         "total_time_seconds": total_time,
         "training_computational_cost_seconds": total_time,
         "stopped_early": stopped_early,

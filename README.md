@@ -21,6 +21,8 @@ All experiment outputs (model checkpoints, masks, metrics, logs) are saved in a 
 
 All algorithms (IMP, Early-Bird, GraSP, SynFlow, GA, Hybrid, Hybrid-Improve) produce this unified output format for easy downstream analysis.
 
+Supported datasets in the CLI: `cifar10`, `cifar100`, `mnist`, `fashion_mnist`.
+
 ## Installation
 
 ```bash
@@ -293,6 +295,31 @@ python -m src.experiments --algorithm hybrid \
     --device cuda
 ```
 
+Fashion-MNIST diagnostic run:
+
+```bash
+python -m src.experiments --algorithm hybrid \
+    --model resnet20 \
+    --dataset fashion_mnist \
+    --seed 42 \
+    --target_sparsity 0.8 \
+    --oneshot_ratio 0.7 \
+    --iterative_step 0.02 \
+    --initial_epochs 100 \
+    --initial_lr 0.01 \
+    --oneshot_finetune_max_epochs 200 \
+    --oneshot_finetune_patience 50 \
+    --iter_finetune_max_epochs 30 \
+    --iter_finetune_patience 10 \
+    --oneshot_scheduler_type cosine \
+    --iter_scheduler_type none \
+    --batch_size 128 \
+    --learning_rate 0.1 \
+    --momentum 0.9 \
+    --weight_decay 5e-4 \
+    --device cuda
+```
+
 **Available Hybrid arguments:**
 - `--target_sparsity`: Target overall sparsity (default: 0.9)
 - `--oneshot_ratio`: Fraction of target to prune in one shot (default: 0.7)
@@ -361,6 +388,31 @@ python -m src.experiments --algorithm hybrid_improve \
     --device cuda
 ```
 
+Fashion-MNIST diagnostic run:
+
+```bash
+python -m src.experiments --algorithm hybrid_improve \
+    --model resnet20 \
+    --dataset fashion_mnist \
+    --seed 42 \
+    --target_sparsity 0.8 \
+    --oneshot_ratio 0.7 \
+    --iterative_step 0.02 \
+    --initial_epochs 100 \
+    --initial_lr 0.1 \
+    --oneshot_finetune_max_epochs 200 \
+    --oneshot_finetune_patience 100 \
+    --iter_finetune_max_epochs 10 \
+    --iter_finetune_patience 5 \
+    --oneshot_scheduler_type cosine \
+    --iter_scheduler_type none \
+    --batch_size 128 \
+    --learning_rate 0.1 \
+    --momentum 0.9 \
+    --weight_decay 5e-4 \
+    --device cuda
+```
+
 **Available Hybrid-Improve arguments:**
 - `--target_sparsity`: Target overall sparsity (default: 0.8)
 - `--oneshot_ratio`: Fraction of target to prune in one shot (default: 0.7)
@@ -402,7 +454,7 @@ The command updates `results.json` in place and creates a timestamped backup:
 
 All algorithms support:
 - `--model`: Architecture (resnet20, resnet50, vgg16, vgg19)
-- `--dataset`: Dataset (cifar10, cifar100, mnist)
+- `--dataset`: Dataset (cifar10, cifar100, mnist, fashion_mnist)
 - `--seed`: Random seed (default: 42)
 - `--device`: cuda or cpu (default: cuda)
 - `--batch_size`: Training batch size
@@ -419,3 +471,17 @@ python -m src.experiments --mode quick_earlybird
 python -m src.experiments --mode quick_grasp
 python -m src.experiments --mode quick_synflow
 ```
+
+## Fashion-MNIST Hybrid Diagnostics
+
+Use Fashion-MNIST as a diagnostic dataset for the hybrid family. For each run, inspect these fields from `results.json`:
+
+- `final_results.final_test_accuracy`
+- `final_results.best_phase_test_accuracy`
+- `final_results.overall_sparsity`
+- `phases[0].finetune_epochs_run`
+- `phases[0].final_lr_effective`
+- `phases[0].min_lr_effective`
+- `final_results.oneshot_final_lr_effective`
+
+Use `summary.csv` to inspect epoch-by-epoch LR during one-shot fine-tuning. When `oneshot_scheduler_type=cosine`, check whether the one-shot phase ends with LR very close to `0`; if it does, treat that as evidence that the transition into iterative pruning may be underpowered and use it to motivate changes in `hybrid_improve`.
