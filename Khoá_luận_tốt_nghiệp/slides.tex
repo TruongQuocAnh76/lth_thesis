@@ -155,7 +155,7 @@ có độ chính xác tập test cao hơn hoặc bằng mạng gốc với cùng
     \framesubtitle{Thuật toán 3: Gradient Signal Preservation (GraSP)}
     \begin{columns}
         \column{0.55\textwidth}
-        \textbf{Ý tưởng:} Cắt tỉa tại thời điểm khởi tạo sao cho \textbf{mực độ gradient bị suy giảm ít nhất} sau khi tỉa.
+        \textbf{Ý tưởng:} Cắt tỉa tại thời điểm khởi tạo sao cho \textbf{mức độ gradient bị suy giảm ít nhất} sau khi tỉa.
         \vspace{0.2cm}
         \begin{block}{Điểm quan trọng (saliency)}
             Mô hình hóa tỉa như nhiễu loạn $\boldsymbol{\delta}$ tác động lên $\theta_0$:
@@ -183,7 +183,7 @@ có độ chính xác tập test cao hơn hoặc bằng mạng gốc với cùng
         \column{0.55\textwidth}
         \textbf{Vấn đề giải quyết:} Tránh \textit{sụp đổ tầng}  -- hiện tượng loại bỏ toàn bộ tham số của một tầng, khiến mạng không thể huấn luyện.
         \vspace{0.2cm}
-        \begin{block}{Hàm mục tiêu (không dùng dữ liệu)}
+        \begin{block}{Hàm mục tiêu}
             \[\mathcal{R}_\text{SF}(\theta) = \mathbf{1}^\top \!\left(\prod_{l=1}^{L}|\theta^{[l]}|\right)\mathbf{1}\]
         \end{block}
         \begin{block}{Điểm Synaptic Flow}
@@ -332,7 +332,7 @@ có độ chính xác tập test cao hơn hoặc bằng mạng gốc với cùng
         \column{0.5\textwidth}
         \textbf{Mức độ thưa được đánh giá:}
         \begin{center}
-            $S \in \{0.30,\ 0.40,\ 0.50,\ 0.60,\ 0.70,\ 0.80,\ 0.90\}$
+            $S \in \{0.30,\ 0.60,\ 0.90\}$
         \end{center}
         \vspace{0.3cm}
         \textbf{Chỉ số đánh giá:}
@@ -341,7 +341,7 @@ có độ chính xác tập test cao hơn hoặc bằng mạng gốc với cùng
             \item Mức giảm độ chính xác $\Delta\text{Acc}$
             \item Phân phối độ thưa theo tầng
             \item Độ trễ suy diễn (ms/batch)
-            \item FLOPs tiết kiệm được
+            \item FLOPs tiết kiệm được % FLOPsconv​=Hout​Wout​Cout​(2Kh​Kw​groupsCin​​+bias)⋅mask density
         \end{itemize}
     \end{columns}
 }
