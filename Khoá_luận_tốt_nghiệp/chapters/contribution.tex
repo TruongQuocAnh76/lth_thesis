@@ -3,17 +3,17 @@
         \subsection{Điểm yếu của thuật toán Hybrid}
             Mặc dù thuật toán cắt tỉa lai đã cho thấy hiệu quả vượt trội so với hai chiến lược riêng lẻ trong phần lớn các kịch bản, thuật toán gốc vẫn tồn tại ba điểm yếu cơ bản ảnh hưởng đến hiệu năng và khả năng tổng quát hóa.
     
-            Đầu tiên, thuật toán gốc khuyến nghị $r_k \in [0.60, 0.80]$ dựa trên kết quả \gls{grid_search} trên một tập kiến trúc và tập dữ liệu (\gls{dataset}) hạn chế \cite[Sec~.5.5]{hybrid}. Không có nguyên tắc lý thuyết nào kết nối $r_k$ với khả năng chịu đựng của mạng đối với việc loại bỏ trọng số đột ngột. Cùng một giá trị $r_k$ được áp dụng cho ResNet và ViT, mặc dù hai kiến trúc này có bề mặt mất mát \gls{loss_landscape} rất khác nhau. Hệ quả là với các kiến trúc chưa được \gls{benchmark}, người dùng phải thực hiện \gls{grid_search} tốn kém, hoặc chấp nhận hiệu năng dưới mức tối ưu.
+            Đầu tiên, thuật toán gốc khuyến nghị $r_k \in [0.60, 0.80]$ dựa trên kết quả \gls{grid_search} trên một tập kiến trúc và tập dữ liệu hạn chế \cite[Sec~.5.5]{hybrid}. Không có nguyên tắc lý thuyết nào kết nối $r_k$ với khả năng chịu đựng của mạng đối với việc loại bỏ trọng số đột ngột. Cùng một giá trị $r_k$ được áp dụng cho ResNet và ViT, mặc dù hai kiến trúc này có \gls{loss_landscape} rất khác nhau. Hệ quả là với các kiến trúc chưa được \gls{benchmark}, người dùng phải thực hiện \gls{grid_search} tốn kém, hoặc chấp nhận hiệu năng dưới mức tối ưu.
     
             Thứ hai, quá trình tinh chỉnh sau bước cắt tỉa một lần dựa hoàn toàn vào \gls{train_loss}. Sau khi tỉa $r_k \times p$ trọng số trong một bước, mạng trải qua một thay đổi cấu trúc lớn. Thuật toán gốc khôi phục hiệu năng thuần túy thông qua $\approx 200$ epoch tinh chỉnh bằng \gls{train_loss}. Điều này có hai vấn đề. Thứ nhất, nó tốn kém về tính toán và không có tín hiệu bên ngoài nào hướng dẫn mạng về những \gls{representation} nào cần khôi phục. Thứ hai, khi $r_k$ lớn (gần 80\%), mạng thường không hội tụ đủ trong $\tau_k$ epoch vì không gian tham số bị thu hẹp đột ngột quá nhiều.
     
-            Thứ ba, là vấn đề khi chuyển tiếp đột ngột từ giai đoạn cắt tỉa một lần sang \gls{iterative_pruning}. Khi kết thúc giai đoạn cắt tỉa một lần, \gls{learning_rate} đã suy giảm về gần 0 theo lịch hồi quy cosine (cosine schedule). Giai đoạn \gls{iterative_geometric_schedule} bắt đầu từ tốc độ học nhỏ $\eta_{ft}$ mà không có giai đoạn khởi động \gls{warm_up}, tức là ngay sau mỗi bước tỉa nhỏ tiếp theo, thuật toán giảm độ dốc (gradient descent) hoạt động trong một vùng rất hẹp quanh điểm hội tụ của giai đoạn trước. Điều này hạn chế khả năng tái tổ chức trọng số, đặc biệt ở tỉ lệ tỉa cao khi các trọng số còn lại cần thích nghi nhiều hơn với cấu trúc mạng mới.
+            Thứ ba, là vấn đề khi chuyển tiếp đột ngột từ giai đoạn cắt tỉa một lần sang \gls{iterative_pruning}. Khi kết thúc giai đoạn cắt tỉa một lần, \gls{learning_rate} đã suy giảm về gần 0 theo lịch hồi quy cosine (cosine schedule). Giai đoạn \gls{iterative_geometric_schedule} bắt đầu từ tốc độ học nhỏ $\eta_{ft}$ mà không có \gls{warm_up}, tức là ngay sau mỗi bước tỉa nhỏ tiếp theo, thuật toán giảm độ dốc (gradient descent) hoạt động trong một vùng rất hẹp quanh điểm hội tụ của giai đoạn trước. Điều này hạn chế khả năng tái tổ chức trọng số, đặc biệt ở tỉ lệ tỉa cao khi các trọng số còn lại cần thích nghi nhiều hơn với cấu trúc mạng mới.
 
         \subsection{Đề xuất cải tiến}
             Để giải quyết vấn dề thứ nhất, thay vì chọn $r_k$ theo kinh nghiệm, ta muốn xác định $r_k$ trực tiếp từ đặc tính của bề mặt mất mát trước khi tỉa. Ta thực hiện điều này dựa trên hàm mất mát: nếu bề mặt mất mát phẳng (độ cong thấp), mạng chịu được tỉa mạnh vì các trọng số còn lại dễ bù đắp cho phần đã bị loại bỏ; ngược lại, bề mặt nhọn đòi hỏi $r_k$ nhỏ hơn.
 
             \paragraph{Fisher Information Trace.}
-            Ma trận thông tin Fisher (Fisher Information Matrix, \gls{fim}) là $$\mathbf{F} = \mathbb{E}_{(x,y)\sim p_\text{data}}\left[\nabla_\theta \log p(y|x,\theta)\,\nabla_\theta \log p(y|x,\theta)^\top\right]$$
+            Ma trận thông tin Fisher (\gls{fim}) là $$\mathbf{F} = \mathbb{E}_{(x,y)\sim p_\text{data}}\left[\nabla_\theta \log p(y|x,\theta)\,\nabla_\theta \log p(y|x,\theta)^\top\right]$$
             Trace của $\mathbf{F}$ đo tổng độ cong của log-likelihood theo mọi hướng tham số. Thay vì tính FIM đầy đủ (chi phí $O(|\theta|^2)$), ta ước lượng vết thực nghiệm bằng chuẩn bình phương gradient:
 
             \begin{equation}
@@ -40,7 +40,7 @@
                 \mathcal{L}_\text{total} = (1 - \lambda)\,\mathcal{L}_\text{task}(\theta_{pk}) + \lambda\,\mathcal{L}_\text{KD}(\theta_{pk},\, \theta_0),
                 \label{eq:kd_loss}
             \end{equation}
-            trong đó hàm chưng cất (distillation) dựa trên độ đo KL (KL-divergence) giữa phân phối softmax (softmax) nhiệt độ $T$ của hai mô hình:
+            trong đó hàm chưng cất (distillation) dựa trên độ đo KL (KL-divergence) giữa phân phối softmax nhiệt độ $T$ của hai mô hình:
              
             \begin{equation}
                 \mathcal{L}_{\text{KD}}(\theta_{pk}, \theta_0)
@@ -52,7 +52,7 @@
                 \label{eq:kd_kl}
             \end{equation}
             Hệ số $T^2$ chuẩn hóa gradient về cùng biên độ với $\mathcal{L}_\text{task}$.
-            Sau khi giai đoạn cắt tỉa một lần kết thúc, mạng đã khôi phục hiệu năng gần với mạng giáo viên (teacher). Tiếp tục dùng KD trong giai đoạn hình học (geometric) sẽ kìm hãm các điều chỉnh trọng số nhỏ mà cắt tỉa hình học (geometric pruning) cần thực hiện --- giáo viên (teacher) đã không còn là mục tiêu phù hợp vì cấu trúc mạng đã khác. Do đó, $\mathcal{L}_\text{KD}$ chỉ được dùng khi $n = 0$ (bước cắt tỉa một lần), và bị tắt hoàn toàn với $n \geq 1$.
+            Sau khi giai đoạn cắt tỉa một lần kết thúc, mạng đã khôi phục hiệu năng gần với mạng giáo viên. Tiếp tục dùng KD trong giai đoạn hình học (geometric) sẽ kìm hãm các điều chỉnh trọng số nhỏ mà cắt tỉa hình học (geometric pruning) cần thực hiện --- giáo viên đã không còn là mục tiêu phù hợp vì cấu trúc mạng đã khác. Do đó, $\mathcal{L}_\text{KD}$ chỉ được dùng khi $n = 0$ (bước cắt tỉa một lần), và bị tắt hoàn toàn với $n \geq 1$.
 
 
             Với vấn đề thứ ba, ở cuối giai đoạn cắt tỉa một lần, hồi quy cosine (cosine annealing) đã đưa \gls{learning_rate} về gần bằng 0. Khi giai đoạn lặp (iterative) bắt đầu và thực hiện bước tỉa đầu tiên, thuật toán giảm độ dốc (gradient descent) chỉ hoạt động trong vùng rất hẹp quanh điểm hội tụ cũ. Điều này hạn chế khả năng các trọng số còn lại tái tổ chức để bù đắp cho phần vừa bị tỉa.
@@ -195,7 +195,7 @@
             \end{table}
 
         \subsection{Kiến trúc mạng}
-        Bốn kiến trúc mạng nơ-ron được sử dụng trong luận văn nhằm đánh giá
+        Hai kiến trúc mạng nơ-ron được sử dụng trong luận văn nhằm đánh giá
     hiệu quả của các thuật toán \pruning trên nhiều quy mô mô hình khác nhau,
     từ mạng nhỏ gọn đến mạng sâu có dung lượng lớn.
     
@@ -245,7 +245,7 @@
         \end{equation}
         Giá trị $\Delta$Acc càng nhỏ càng cho thấy phương pháp \pruning bảo toàn tốt hiệu năng ban đầu.
 
-Mỗi cấu hình thử nghiệm được chạy với nhiều hạt giống ngẫu nhiên (random seed), kết quả được báo cáo dưới dạng trung bình $\pm$ độ lệch chuẩn.
+        Mỗi cấu hình thử nghiệm được chạy với 3 hạt giống ngẫu nhiên khác nhau; với mỗi cấu hình, kết quả được báo cáo dưới dạng trung bình cộng của 3 lần chạy $\pm$ độ lệch chuẩn mẫu tính trên chính 3 giá trị đó.
 
         % ----------------------------------------------------------
         \subsubsection{Chỉ số nén và sparsity}
